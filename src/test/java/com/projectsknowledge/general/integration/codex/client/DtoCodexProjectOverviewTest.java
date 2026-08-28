@@ -11,7 +11,11 @@ import org.junit.jupiter.api.Test;
 class DtoCodexProjectOverviewTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final CodexAppServerClient client = new CodexAppServerClient(mapper, new ProjectsKnowledgeProperties());
+    private final CodexAppServerClient client = new CodexAppServerClient(
+        mapper,
+        new ProjectsKnowledgeProperties(),
+        org.mockito.Mockito.mock(CodexAppServerTransport.class)
+    );
     private final String valid = """
         {"frontend":[],"backend":["Spring Boot"],"databases":[],"domains":["Shipping"],
          "integrations":[{"name":"Orbit","repositoryName":"arbitrary","filePath":"src/remote.java"}],

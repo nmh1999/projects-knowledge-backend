@@ -10,24 +10,15 @@ import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicK
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexProjectOverview;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoWorkflowKnowledgeResult;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -37,6 +28,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CodexAppServerClient {
 
     // Both modes use the same summary depth; Basic saves output by omitting other sections.
@@ -59,22 +51,22 @@ public class CodexAppServerClient {
         "The mode-specific answer and investigation instructions below apply only when inScope=true. ";
     private final ObjectMapper mapper;
     private final ProjectsKnowledgeProperties properties;
+    private final CodexAppServerTransport transport;
 
     public List<CodexThread> listThreads() {
-        try (Session session = startSession()) {
-            session.initialize();
-            JsonNode result = session.request(
-                1,
+        JsonNode result = transport
+            .connection()
+            .request(
                 "thread/list",
-                Map.of("limit", 100, "archived", false, "sortKey", "updated_at", "sortDirection", "desc")
+                Map.of("limit", 100, "archived", false, "sortKey", "updated_at", "sortDirection", "desc"),
+                setupTimeout()
             );
-            List<CodexThread> threads = new ArrayList<>();
-            for (JsonNode thread : result.path("data")) {
-                String cwd = thread.path("cwd").asText("");
-                if (!cwd.isBlank()) threads.add(new CodexThread(Path.of(cwd), thread.path("updatedAt").asLong(0)));
-            }
-            return threads;
+        List<CodexThread> threads = new ArrayList<>();
+        for (JsonNode thread : result.path("data")) {
+            String cwd = thread.path("cwd").asText("");
+            if (!cwd.isBlank()) threads.add(new CodexThread(Path.of(cwd), thread.path("updatedAt").asLong(0)));
         }
+        return threads;
     }
 
     public DtoCodexKnowledgeResult ask(List<Path> workspaceRoots, String question, String language, SearchMode mode) {
@@ -117,8 +109,12 @@ public class CodexAppServerClient {
             HttpStatus.BAD_REQUEST,
             "The selected Codex project has no readable workspace."
         );
-        try (Session session = startSession()) {
-            session.initialize();
+        long started = System.nanoTime();
+        CodexAppServerConnection connection = transport.connection();
+        String threadId = null;
+        long turnStarted = 0;
+        boolean completed = false;
+        try {
             List<String> roots = workspaceRoots
                 .stream()
                 .map(path -> path.toAbsolutePath().normalize().toString())
@@ -130,9 +126,12 @@ public class CodexAppServerClient {
             startParams.put("approvalPolicy", "never");
             startParams.put("ephemeral", true);
             startParams.put("developerInstructions", developerInstructions);
-            JsonNode threadResult = session.request(2, "thread/start", startParams);
-            String threadId = threadResult.path("thread").path("id").asText();
-            if (threadId.isBlank()) throw session.failure("Codex did not create a thread.");
+            JsonNode threadResult = connection.request("thread/start", startParams, setupTimeout());
+            threadId = threadResult.path("thread").path("id").asText();
+            if (threadId.isBlank()) {
+                connection.close();
+                throw new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, "Codex did not create a thread.");
+            }
 
             Map<String, Object> turnParams = new LinkedHashMap<>();
             turnParams.put("threadId", threadId);
@@ -140,9 +139,29 @@ public class CodexAppServerClient {
             turnParams.put("effort", "medium");
             turnParams.put("summary", "concise");
             turnParams.put("outputSchema", schema);
-            session.send(3, "turn/start", turnParams);
-            return session.readFinalAnswer(3);
+            turnStarted = System.nanoTime();
+            String answer = connection.runTurn(
+                threadId,
+                turnParams,
+                Duration.ofSeconds(Math.max(1, properties.getCodex().getTimeoutSeconds()))
+            );
+            completed = true;
+            return answer;
+        } finally {
+            long finished = System.nanoTime();
+            // Timing only: never log questions, answers, repository paths or protocol payloads.
+            log.info(
+                "Codex analysis: completed={}, setupMs={}, turnMs={}",
+                completed,
+                Duration.ofNanos((turnStarted == 0 ? finished : turnStarted) - started).toMillis(),
+                turnStarted == 0 ? 0 : Duration.ofNanos(finished - turnStarted).toMillis()
+            );
+            if (threadId != null && !threadId.isBlank()) connection.unsubscribe(threadId);
         }
+    }
+
+    private Duration setupTimeout() {
+        return Duration.ofSeconds(Math.max(1, Math.min(30, properties.getCodex().getTimeoutSeconds())));
     }
 
     String overviewInstructions() {
@@ -520,205 +539,5 @@ public class CodexAppServerClient {
         return node;
     }
 
-    private Session startSession() {
-        if (!properties.getCodex().isEnabled()) {
-            throw new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, "Codex integration is disabled.");
-        }
-        try {
-            ProcessBuilder builder = new ProcessBuilder(resolveCommand(), "app-server", "--listen", "stdio://");
-            builder.redirectErrorStream(false);
-            return new Session(builder.start(), Duration.ofSeconds(properties.getCodex().getTimeoutSeconds()));
-        } catch (IOException exception) {
-            throw new KnowledgeException(
-                HttpStatus.SERVICE_UNAVAILABLE,
-                "Could not start Codex app-server (" +
-                    exception.getMessage() +
-                    "). Make sure Codex is installed and signed in."
-            );
-        }
-    }
-
-    private String resolveCommand() {
-        String configured = properties.getCodex().getCommand();
-        Path configuredPath = Path.of(configured);
-        if (configuredPath.isAbsolute() && Files.isRegularFile(configuredPath)) return configuredPath.toString();
-        String appData = System.getenv("APPDATA");
-        if (appData != null && configured.toLowerCase(Locale.ROOT).startsWith("codex")) {
-            Path npmPackage = Path.of(appData, "npm", "node_modules", "@openai", "codex", "node_modules");
-            if (Files.isDirectory(npmPackage)) {
-                try (Stream<Path> candidates = Files.walk(npmPackage, 8)) {
-                    Optional<Path> npmExecutable = candidates
-                        .filter(Files::isRegularFile)
-                        .filter(path -> path.getFileName().toString().equalsIgnoreCase("codex.exe"))
-                        .findFirst();
-                    if (npmExecutable.isPresent()) return npmExecutable.get().toString();
-                } catch (IOException ignored) {}
-            }
-        }
-        String pathValue = Optional.ofNullable(System.getenv("PATH")).orElse("");
-        for (String directory : pathValue.split(java.io.File.pathSeparator)) {
-            if (directory.isBlank()) continue;
-            Path candidate = Path.of(directory).resolve(configured);
-            if (Files.isRegularFile(candidate)) return candidate.toString();
-            if (!configured.toLowerCase(Locale.ROOT).endsWith(".exe")) {
-                Path executable = Path.of(directory).resolve(configured + ".exe");
-                if (Files.isRegularFile(executable)) return executable.toString();
-            }
-        }
-        return configured;
-    }
-
     public record CodexThread(Path cwd, long updatedAt) {}
-
-    private final class Session implements AutoCloseable {
-
-        private final Process process;
-        private final BufferedReader output;
-        private final BufferedWriter input;
-        private final Duration timeout;
-        private final StringBuilder errors = new StringBuilder();
-
-        private Session(Process process, Duration timeout) {
-            this.process = process;
-            this.timeout = timeout;
-            this.output = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-            this.input = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
-            Thread.ofVirtual().start(() -> {
-                try (
-                    BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8)
-                    )
-                ) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (errors.length() < 4000) errors.append(line).append('\n');
-                    }
-                } catch (IOException ignored) {}
-            });
-        }
-
-        private void initialize() {
-            request(
-                0,
-                "initialize",
-                Map.of(
-                    "clientInfo",
-                    Map.of("name", "projects_knowledge", "title", "Projects Knowledge", "version", "0.1.0"),
-                    "capabilities",
-                    Map.of("experimentalApi", true)
-                )
-            );
-            notify("initialized", Map.of());
-        }
-
-        private JsonNode request(int id, String method, Object params) {
-            send(id, method, params);
-            long deadline = System.nanoTime() + timeout.toNanos();
-            while (System.nanoTime() < deadline) {
-                JsonNode message = nextMessage(deadline);
-                if (message == null) break;
-                if (message.path("id").asInt(-1) != id) continue;
-                if (message.has("error")) throw failure(
-                    message.path("error").path("message").asText("Codex request failed.")
-                );
-                return message.path("result");
-            }
-            throw failure("Timed out waiting for Codex.");
-        }
-
-        private String readFinalAnswer(int turnRequestId) {
-            long deadline = System.nanoTime() + timeout.toNanos();
-            String lastAnswer = "";
-            boolean accepted = false;
-            while (System.nanoTime() < deadline) {
-                JsonNode message = nextMessage(deadline);
-                if (message == null) break;
-                if (message.path("id").asInt(-1) == turnRequestId) {
-                    if (message.has("error")) throw failure(
-                        message.path("error").path("message").asText("Codex turn failed.")
-                    );
-                    accepted = true;
-                }
-                if ("item/completed".equals(message.path("method").asText())) {
-                    JsonNode item = message.path("params").path("item");
-                    if ("agentMessage".equals(item.path("type").asText())) lastAnswer = item
-                        .path("text")
-                        .asText(lastAnswer);
-                }
-                if ("turn/completed".equals(message.path("method").asText())) {
-                    String status = message.path("params").path("turn").path("status").asText();
-                    if (!"completed".equals(status)) throw failure("Codex turn ended with status: " + status);
-                    if (lastAnswer.isBlank()) throw failure("Codex completed without an answer.");
-                    return lastAnswer;
-                }
-            }
-            throw failure(accepted ? "Timed out while Codex was answering." : "Codex did not accept the question.");
-        }
-
-        private JsonNode nextMessage(long deadline) {
-            try {
-                while (System.nanoTime() < deadline) {
-                    if (output.ready()) {
-                        String line = output.readLine();
-                        if (line == null) return null;
-                        if (!line.isBlank()) return mapper.readTree(line);
-                    }
-                    if (!process.isAlive()) throw failure("Codex app-server stopped unexpectedly.");
-                    Thread.sleep(25);
-                }
-                return null;
-            } catch (IOException exception) {
-                throw failure("Could not read the Codex response.");
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw failure("Codex request was interrupted.");
-            }
-        }
-
-        private void send(int id, String method, Object params) {
-            ObjectNode message = mapper.createObjectNode();
-            message.put("id", id);
-            message.put("method", method);
-            message.set("params", mapper.valueToTree(params));
-            write(message);
-        }
-
-        private void notify(String method, Object params) {
-            ObjectNode message = mapper.createObjectNode();
-            message.put("method", method);
-            message.set("params", mapper.valueToTree(params));
-            write(message);
-        }
-
-        private void write(JsonNode message) {
-            try {
-                input.write(mapper.writeValueAsString(message));
-                input.newLine();
-                input.flush();
-            } catch (IOException exception) {
-                throw failure("Could not send a request to Codex.");
-            }
-        }
-
-        private KnowledgeException failure(String message) {
-            String detail = errors.toString().trim();
-            return new KnowledgeException(
-                HttpStatus.SERVICE_UNAVAILABLE,
-                detail.isBlank() ? message : message + " " + detail
-            );
-        }
-
-        @Override
-        public void close() {
-            try {
-                input.close();
-            } catch (IOException ignored) {}
-            if (process.isAlive()) process.destroy();
-            try {
-                if (!process.waitFor(2, TimeUnit.SECONDS) && process.isAlive()) process.destroyForcibly();
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
 }

@@ -52,6 +52,25 @@ Operational defaults are in `src/main/resources/application.yml`. Override them 
 
 Projects and repository roots come dynamically from Codex workspaces. This backend does not ship a fixed list of project names, repository paths, package namespaces, or integration vendors. Restarting the service clears its in-memory caches.
 
+## Codex connection lifecycle
+
+The backend lazily starts one private `codex app-server --listen stdio://` process and initializes it once. Catalog requests and independent question/overview conversations reuse that connection. There is no model warm-up request and no conversation history is reused: each analysis still creates a fresh, ephemeral, read-only thread with `medium` effort.
+
+- Request IDs route RPC replies; thread and turn IDs isolate concurrent answers. A catalog request does not wait for another question to finish.
+- Completed threads are unsubscribed using the [official OpenAI app-server protocol](https://learn.chatgpt.com/docs/app-server#unsubscribe-from-a-loaded-thread). Codex controls when unsubscribed threads are unloaded.
+- A disconnected or failed connection is replaced on the **next** request. Questions are never automatically replayed after an ambiguous failure, avoiding duplicate model usage.
+- A transport timeout, interruption, malformed protocol message or failed cleanup resets the private process. Other in-flight requests on that connection can fail too; the UI's retry action is explicit. A completed answer is retained if only its cleanup fails.
+- Setup/RPC waits are capped at 30 seconds (or the configured timeout, if lower); answer acknowledgement and completion share the configured 300-second deadline. Cleanup has a 2-second deadline. Shutting down the backend terminates its private process.
+- Logs contain connection setup and per-analysis `setupMs`/`turnMs` timings, not prompts, answers, repository paths or raw Codex logs. Connection reuse removes repeated startup overhead; it does not guarantee faster repository analysis.
+
+Normal tests use an in-memory JSONL peer. An optional local smoke test checks connection reuse and ephemeral-thread cleanup without any model turns:
+
+```powershell
+$env:CODEX_TRANSPORT_SMOKE_TEST = 'true'
+.\mvnw.cmd '-Dtest=CodexConnectionSmokeTest' test
+Remove-Item Env:CODEX_TRANSPORT_SMOKE_TEST
+```
+
 ## API
 
 - `GET /api/projects`: list available projects without model analysis.

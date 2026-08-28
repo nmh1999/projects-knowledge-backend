@@ -12,7 +12,11 @@ import org.junit.jupiter.api.Test;
 class CodexSearchModeTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final CodexAppServerClient client = new CodexAppServerClient(mapper, new ProjectsKnowledgeProperties());
+    private final CodexAppServerClient client = new CodexAppServerClient(
+        mapper,
+        new ProjectsKnowledgeProperties(),
+        org.mockito.Mockito.mock(CodexAppServerTransport.class)
+    );
 
     @Test
     void basicRequestsOnlySummaryConfidenceAndScope() {

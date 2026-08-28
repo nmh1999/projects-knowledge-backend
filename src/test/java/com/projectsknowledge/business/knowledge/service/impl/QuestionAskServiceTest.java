@@ -266,7 +266,7 @@ class QuestionAskServiceTest {
         private final List<SearchMode> modes = new ArrayList<>();
 
         private StubCodexClient(DtoCodexKnowledgeResult result, ProjectsKnowledgeProperties properties) {
-            super(new ObjectMapper(), properties);
+            super(new ObjectMapper(), properties, null);
             this.result = result;
         }
 
