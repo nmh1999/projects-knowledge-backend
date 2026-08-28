@@ -80,6 +80,32 @@ This service accesses local repositories through read-only analysis and validate
 
 There is no built-in public-user authentication. Keep the service bound to localhost or protected inside a trusted environment; do not expose it directly to the Internet. Do not upload Codex authentication, local configuration, repository data, logs or generated answers to GitHub.
 
+## Code organization
+
+The package layout follows the Public Marts backend conventions, using this application's own domain and namespace:
+
+```text
+src/main/java/com/projectsknowledge/
+  business/
+    project/    catalog, controller, entity, enums, mapper, schema/response, service/impl
+    knowledge/  controller, enums, mapper, schema/request, schema/response, service/impl
+    source/     controller, schema/response, service/impl
+  general/
+    config/     application properties and the shared clock
+    exception/  API error handling
+    integration/codex/  client and structured response schemas
+    scanner/    safe repository discovery and source access
+    security/   source redaction
+```
+
+- Controllers depend on service **interfaces**; Spring implementations live in `service/impl` and use Lombok constructor injection.
+- Request/response names use `Req...` / `Dto...`. Response records support Lombok builders and retain their existing immutable field bindings. Request records preserve validation and default-mode normalization.
+- Stateless mapping lives in final `*Mapper` classes with static methods. Runtime project entities use Lombok accessors; they are not database entities.
+- Tests mirror the production packages. `.editorconfig` defines the basic Java formatting conventions.
+- Keep project discovery dynamic. Do not copy reference-project names, repository paths, business rules, credentials, database layers or authorization setup into this application.
+
+This is a structural refactor: Java 21, Spring Boot, Maven, `/api` URLs, JSON fields and cache behavior remain unchanged. No database transactions or response-envelope layer are added to a service that does not need them.
+
 ## GitHub
 
 Publish this folder as its own repository. Commit `src`, `pom.xml`, the Maven wrapper files and `.mvn/wrapper`; exclude `target`, local IDE settings and credentials using the included `.gitignore`. Keep the companion frontend in its own repository.

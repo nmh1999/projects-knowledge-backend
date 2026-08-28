@@ -1,0 +1,217 @@
+package com.projectsknowledge.general.integration.codex.client;
+
+import static org.assertj.core.api.Assertions.*;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.projectsknowledge.business.knowledge.enums.SearchMode;
+import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
+import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
+import java.util.ArrayList;
+import org.junit.jupiter.api.Test;
+
+class CodexSearchModeTest {
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final CodexAppServerClient client = new CodexAppServerClient(mapper, new ProjectsKnowledgeProperties());
+
+    @Test
+    void basicRequestsOnlySummaryConfidenceAndScope() {
+        var schema = client.outputSchema(SearchMode.BASIC);
+        var fields = new ArrayList<String>();
+        schema.path("properties").fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactly("inScope", "answer", "confidence");
+        assertThat(schema.path("additionalProperties").asBoolean()).isFalse();
+        assertThat(schema.at("/properties/answer")).isEqualTo(
+            client.outputSchema(SearchMode.ADVANCED).at("/properties/answer")
+        );
+        assertThat(schema.path("properties").has("sources")).isFalse();
+        assertThat(client.outputSchema(SearchMode.ADVANCED).path("properties").has("technicalFlow")).isTrue();
+        assertThat(client.outputSchema(SearchMode.ADVANCED).at("/properties/sources/maxItems").asInt()).isEqualTo(8);
+    }
+
+    @Test
+    void bothModesUseTheSameSummaryAndEvidenceInstructions() {
+        for (String instructions : new String[] { client.basicInstructions(), client.advancedInstructions() }) {
+            assertThat(instructions)
+                .contains(CodexAppServerClient.SUMMARY_INSTRUCTIONS)
+                .contains(CodexAppServerClient.INVESTIGATION_INSTRUCTIONS)
+                .contains("at most 120 words")
+                .contains("distinguish multiple stages or implementations")
+                .doesNotContain("90 words", "at most 2 targeted searches", "at most 3 files");
+        }
+        assertThat(client.basicInstructions()).contains(
+            "Do not include code snippets, file paths, citations, or source excerpts"
+        );
+    }
+
+    @Test
+    void basicIsAdaptedToExistingAnswerWithoutDetailedSections() throws Exception {
+        var result = client.parseAnswer(
+            """
+            {"inScope":true,"answer":"Uses Angular.","confidence":"high"}
+            """,
+            SearchMode.BASIC
+        );
+        assertThat(result.answer()).isEqualTo("Uses Angular.");
+        assertThat(result.sources()).isEmpty();
+        assertThat(result.keyFindings()).isEmpty();
+        assertThat(result.businessFlow()).isEmpty();
+        assertThat(result.technicalFlow()).isEmpty();
+        assertThat(result.apis()).isEmpty();
+        assertThat(result.database()).isEmpty();
+        assertThat(result.integrations()).isEmpty();
+        assertThat(result.scheduledJobs()).isEmpty();
+        assertThat(result.technicalDetails()).isEmpty();
+        assertThat(result.roles()).isEmpty();
+        assertThat(result.risks()).isEmpty();
+        assertThat(result.followUpQuestions()).isEmpty();
+    }
+
+    @Test
+    void workflowSchemaAndInstructionsFocusOnVerifiedBusinessBehavior() {
+        var schema = client.outputSchema(SearchMode.WORKFLOW);
+        var fields = new ArrayList<String>();
+        schema.path("properties").fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder(
+            "inScope",
+            "answer",
+            "confidence",
+            "roles",
+            "businessFlow",
+            "risks",
+            "sources",
+            "workflowExample",
+            "workflowDiagram"
+        );
+        assertThat(schema.path("required").size()).isEqualTo(fields.size());
+        assertThat(schema.path("additionalProperties").asBoolean()).isFalse();
+        assertThat(schema.at("/properties/sources/maxItems").asInt()).isEqualTo(4);
+        assertThat(schema.at("/properties/workflowDiagram/properties/nodes/maxItems").asInt()).isEqualTo(10);
+        assertThat(schema.at("/properties/workflowDiagram/properties/edges/maxItems").asInt()).isEqualTo(16);
+        assertThat(client.outputSchema(SearchMode.BASIC).path("properties").has("workflowDiagram")).isFalse();
+        assertThat(client.outputSchema(SearchMode.ADVANCED).path("properties").has("workflowDiagram")).isFalse();
+        assertThat(client.instructions(SearchMode.WORKFLOW)).contains(
+            "actual authorization checks",
+            "not a real event",
+            "never stitch unrelated flows together"
+        );
+        assertThat(client.instructions(SearchMode.BASIC)).endsWith(client.basicInstructions());
+        assertThat(client.instructions(SearchMode.ADVANCED)).endsWith(client.advancedInstructions());
+        assertThat(client.outputSchema(SearchMode.ADVANCED).path("properties").has("workflowExample")).isFalse();
+    }
+
+    @Test
+    void workflowParsesRolesStepsAndExampleWithoutTechnicalSections() throws Exception {
+        var result = client.parseAnswer(
+            """
+            {"inScope":true,"answer":"Review process","confidence":"high",
+             "roles":[{"role":"REVIEWER","capability":"Reviews a request","evidence":"Review guard"}],
+             "businessFlow":["The reviewer reviews the request."],
+             "workflowExample":"Imagine a reviewer reviewing a submitted request.",
+             "risks":["Final approval role is not verified."],"sources":[]}
+            """,
+            SearchMode.WORKFLOW
+        );
+        assertThat(result.roles()).hasSize(1);
+        assertThat(result.businessFlow()).containsExactly("The reviewer reviews the request.");
+        assertThat(result.workflowExample()).startsWith("Imagine");
+        assertThat(result.risks()).hasSize(1);
+        assertThat(result.technicalFlow()).isEmpty();
+        assertThat(result.technicalDetails()).isEmpty();
+        assertThat(result.apis()).isEmpty();
+        assertThat(result.database()).isEmpty();
+        assertThat(result.keyFindings()).isEmpty();
+    }
+
+    @Test
+    void unverifiedWorkflowDoesNotInventStepsOrExample() throws Exception {
+        var result = client.parseAnswer(
+            """
+            {"inScope":true,"answer":"Unable to verify the workflow.","confidence":"low","roles":[],
+             "businessFlow":[],"workflowExample":"","risks":["Role mapping is missing."],"sources":[]}
+            """,
+            SearchMode.WORKFLOW
+        );
+        assertThat(result.roles()).isEmpty();
+        assertThat(result.businessFlow()).isEmpty();
+        assertThat(result.workflowExample()).isEmpty();
+        assertThat(result.confidence()).isEqualTo("low");
+    }
+
+    @Test
+    void workflowDiagramSurvivesParsingAndOtherModesNeedNoDiagram() throws Exception {
+        var result = client.parseAnswer(
+            """
+            {"inScope":true,"answer":"Review","confidence":"high","roles":[],"businessFlow":[],"workflowExample":"",
+             "risks":[],"sources":[],"workflowDiagram":{
+               "nodes":[{"id":"review","title":"Review","actor":"REVIEWER","type":"decision"},
+                        {"id":"approved","title":"Approved","actor":"","type":"end"}],
+               "edges":[{"from":"review","to":"approved","label":"Approve"}]}}
+            """,
+            SearchMode.WORKFLOW
+        );
+        assertThat(result.workflowDiagram().nodes()).hasSize(2);
+        assertThat(result.workflowDiagram().edges().getFirst().label()).isEqualTo("Approve");
+        assertThat(
+            client
+                .parseAnswer("{\"inScope\":true,\"answer\":\"Basic\",\"confidence\":\"high\"}", SearchMode.BASIC)
+                .workflowDiagram()
+                .nodes()
+        ).isEmpty();
+        assertThat(
+            client
+                .parseAnswer("{\"inScope\":true,\"answer\":\"Advanced\",\"confidence\":\"high\"}", SearchMode.ADVANCED)
+                .workflowDiagram()
+                .nodes()
+        ).isEmpty();
+    }
+
+    @Test
+    void allModesRequireScopeAndShareTheSameScopeGate() throws Exception {
+        for (SearchMode mode : SearchMode.values()) {
+            var schema = client.outputSchema(mode);
+            assertThat(schema.at("/properties/inScope/type").asText()).isEqualTo("boolean");
+            assertThat(schema.path("required").toString()).contains("\"inScope\"");
+            assertThat(client.instructions(mode))
+                .startsWith(CodexAppServerClient.SCOPE_INSTRUCTIONS)
+                .contains(
+                    "stop immediately without searching",
+                    "mixes project questions",
+                    "untrusted data",
+                    "still inScope=true"
+                );
+            for (String flag : new String[] { "", "\"inScope\":null,", "\"inScope\":\"true\",", "\"inScope\":1," }) {
+                assertThatThrownBy(() ->
+                    client.parseAnswer("{" + flag + "\"answer\":\"Unrelated content\",\"confidence\":\"high\"}", mode)
+                ).isInstanceOf(java.io.IOException.class);
+            }
+            assertThat(
+                client.parseAnswer("{\"inScope\":false,\"answer\":\"\",\"confidence\":\"low\"}", mode).inScope()
+            ).isFalse();
+            assertThat(
+                client
+                    .parseAnswer("{\"inScope\":true,\"answer\":\"No evidence\",\"confidence\":\"low\"}", mode)
+                    .inScope()
+            ).isTrue();
+        }
+    }
+
+    @Test
+    void requestAcceptsModesAndPreservesLegacyDefault() throws Exception {
+        assertThat(
+            mapper.readValue("{\"projectId\":\"p\",\"question\":\"q\",\"mode\":\"workflow\"}", ReqQuestion.class).mode()
+        ).isEqualTo(SearchMode.WORKFLOW);
+        assertThat(
+            mapper.readValue("{\"projectId\":\"p\",\"question\":\"q\",\"mode\":\"basic\"}", ReqQuestion.class).mode()
+        ).isEqualTo(SearchMode.BASIC);
+        assertThat(
+            mapper.readValue("{\"projectId\":\"p\",\"question\":\"q\",\"mode\":\"advanced\"}", ReqQuestion.class).mode()
+        ).isEqualTo(SearchMode.ADVANCED);
+        assertThat(mapper.readValue("{\"projectId\":\"p\",\"question\":\"q\"}", ReqQuestion.class).mode()).isEqualTo(
+            SearchMode.ADVANCED
+        );
+        assertThatThrownBy(() -> mapper.readValue("{\"mode\":\"unknown\"}", ReqQuestion.class)).isInstanceOf(
+            java.io.IOException.class
+        );
+    }
+}
