@@ -22,4 +22,9 @@ public class IntegrationDetailsController {
     public ResponseEntity<DtoKnowledgeAnswer> details(@Valid @RequestBody ReqIntegrationDetails request) {
         return ResponseEntity.ok(questionService.explainIntegration(request));
     }
+
+    @PostMapping("/details/refresh")
+    public ResponseEntity<DtoKnowledgeAnswer> refresh(@Valid @RequestBody ReqIntegrationDetails request) {
+        return ResponseEntity.ok(questionService.refreshIntegration(request));
+    }
 }

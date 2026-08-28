@@ -1,9 +1,11 @@
 package com.projectsknowledge.business.knowledge.schema.response;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+import java.time.Instant;
 import java.util.List;
 import lombok.Builder;
 
-@Builder
+@Builder(toBuilder = true)
 public record DtoKnowledgeAnswer(
     String project,
     String question,
@@ -24,7 +26,9 @@ public record DtoKnowledgeAnswer(
     boolean enoughEvidence,
     String workflowExample,
     DtoWorkflowDiagram workflowDiagram,
-    boolean inScope
+    boolean inScope,
+    @JsonFormat(shape = JsonFormat.Shape.STRING) Instant updatedAt,
+    @JsonFormat(shape = JsonFormat.Shape.STRING) Instant expiresAt
 ) {
     public record FlowNode(String type, String name, String detail) {}
 

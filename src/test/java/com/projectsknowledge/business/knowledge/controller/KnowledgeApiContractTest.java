@@ -96,4 +96,58 @@ class KnowledgeApiContractTest {
             .andExpect(status().isOk());
         verify(service).explainIntegration(new ReqIntegrationDetails("sample", "Example integration", "en"));
     }
+
+    @Test
+    void refreshUsesTheSameValidatedQuestionBodyAndReturnsIsoCacheDates() throws Exception {
+        var question = new ReqQuestion("sample", "Explain tables", "ar", SearchMode.DATABASE);
+        var updated = java.time.Instant.parse("2026-08-28T10:00:00Z");
+        when(service.refresh(question)).thenReturn(
+            com.projectsknowledge.business.knowledge.schema.response.DtoKnowledgeAnswer.builder()
+                .updatedAt(updated)
+                .expiresAt(updated.plusSeconds(18_000))
+                .build()
+        );
+        mvc
+            .perform(
+                post("/api/questions/refresh")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"projectId":"sample","question":"Explain tables","language":"ar","mode":"database"}
+                        """
+                    )
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.updatedAt").value("2026-08-28T10:00:00Z"))
+            .andExpect(jsonPath("$.expiresAt").value("2026-08-28T15:00:00Z"));
+        verify(service).refresh(question);
+        verify(service, never()).ask(any());
+    }
+
+    @Test
+    void refreshRejectsInvalidQuestionAndIntegrationBeforeAnalysis() throws Exception {
+        for (String endpoint : new String[] { "/api/questions/refresh", "/api/integrations/details/refresh" }) {
+            mvc
+                .perform(post(endpoint).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+        }
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void refreshesIntegrationWithoutUsingTheNormalCacheEndpoint() throws Exception {
+        mvc
+            .perform(
+                post("/api/integrations/details/refresh")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"projectId":"sample","name":"Example integration","language":"en"}
+                        """
+                    )
+            )
+            .andExpect(status().isOk());
+        verify(service).refreshIntegration(new ReqIntegrationDetails("sample", "Example integration", "en"));
+        verify(service, never()).explainIntegration(any());
+    }
 }

@@ -33,7 +33,7 @@ public class ProjectsKnowledgeProperties {
             : "codex";
         private int timeoutSeconds = 300;
         private int projectCacheSeconds = 3_600;
-        private int answerCacheSeconds = 900;
+        private int answerCacheSeconds = 18_000;
         private int integrationCacheSeconds = 18_000;
         private int overviewCacheSeconds = 18_000;
         private int overviewCacheMaxEntries = 50;

@@ -22,4 +22,9 @@ public class QuestionAskController {
     public ResponseEntity<DtoKnowledgeAnswer> ask(@Valid @RequestBody ReqQuestion request) {
         return ResponseEntity.ok(questionService.ask(request));
     }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<DtoKnowledgeAnswer> refresh(@Valid @RequestBody ReqQuestion request) {
+        return ResponseEntity.ok(questionService.refresh(request));
+    }
 }

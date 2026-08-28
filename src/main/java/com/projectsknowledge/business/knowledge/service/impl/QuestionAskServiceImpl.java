@@ -6,7 +6,6 @@ import com.projectsknowledge.business.knowledge.schema.request.ReqIntegrationDet
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
 import com.projectsknowledge.business.knowledge.schema.response.DtoKnowledgeAnswer;
 import com.projectsknowledge.business.knowledge.schema.response.DtoKnowledgeAnswer.SourceReference;
-import com.projectsknowledge.business.knowledge.schema.response.DtoWorkflowDiagram;
 import com.projectsknowledge.business.knowledge.service.QuestionAskService;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.entity.Repository;
@@ -16,12 +15,16 @@ import com.projectsknowledge.general.integration.codex.client.CodexAppServerClie
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -33,38 +36,50 @@ public class QuestionAskServiceImpl implements QuestionAskService {
     private final ProjectRetrievalService projectService;
     private final CodexAppServerClient codexClient;
     private final ProjectsKnowledgeProperties properties;
+    private final Clock clock;
     // The cache avoids a second Codex turn for the same normalized question and is bounded by configuration.
-    private final ConcurrentHashMap<CacheKey, CacheEntry> answerCache = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<CacheKey, CacheEntry> integrationCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> answerCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> integrationCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<CacheKey, CompletableFuture<DtoKnowledgeAnswer>> inFlight =
+        new ConcurrentHashMap<>();
 
     @Override
     public DtoKnowledgeAnswer ask(ReqQuestion request) {
+        return answerQuestion(request, false);
+    }
+
+    @Override
+    public DtoKnowledgeAnswer refresh(ReqQuestion request) {
+        return answerQuestion(request, true);
+    }
+
+    private DtoKnowledgeAnswer answerQuestion(ReqQuestion request, boolean refresh) {
         Project project = projectService.requireProject(request.projectId());
         String language = "ar".equalsIgnoreCase(request.language()) ? "ar" : "en";
-        CacheKey key = new CacheKey(project.getId(), language, normalizeQuestion(request.question()), request.mode());
-        int ttlSeconds = properties.getCodex().getAnswerCacheSeconds();
-        DtoKnowledgeAnswer cached = cachedAnswer(answerCache, key, ttlSeconds);
-        if (cached != null) return cached;
-
-        DtoKnowledgeAnswer answer = query(project, request.question(), language, request.mode());
-        cacheAnswer(answerCache, key, answer, ttlSeconds);
-        return answer;
+        CacheKey key = cacheKey(project, language, normalizeQuestion(request.question()), request.mode(), false);
+        return resolve(answerCache, key, properties.getCodex().getAnswerCacheSeconds(), refresh, () ->
+            query(project, request.question(), language, request.mode())
+        );
     }
 
     @Override
     public DtoKnowledgeAnswer explainIntegration(ReqIntegrationDetails request) {
+        return integrationDetails(request, false);
+    }
+
+    @Override
+    public DtoKnowledgeAnswer refreshIntegration(ReqIntegrationDetails request) {
+        return integrationDetails(request, true);
+    }
+
+    private DtoKnowledgeAnswer integrationDetails(ReqIntegrationDetails request, boolean refresh) {
         Project project = projectService.requireProject(request.projectId());
         String language = "ar".equalsIgnoreCase(request.language()) ? "ar" : "en";
         String name = request.name().strip();
-        CacheKey key = new CacheKey(project.getId(), language, name.toLowerCase(Locale.ROOT), SearchMode.ADVANCED);
-        int ttlSeconds = properties.getCodex().getIntegrationCacheSeconds();
-        DtoKnowledgeAnswer cached = cachedAnswer(integrationCache, key, ttlSeconds);
-        if (cached != null) return cached;
-
-        String question = integrationQuestion(name, language);
-        DtoKnowledgeAnswer answer = query(project, question, language, SearchMode.ADVANCED);
-        cacheAnswer(integrationCache, key, answer, ttlSeconds);
-        return answer;
+        CacheKey key = cacheKey(project, language, name.toLowerCase(Locale.ROOT), SearchMode.ADVANCED, true);
+        return resolve(integrationCache, key, properties.getCodex().getIntegrationCacheSeconds(), refresh, () ->
+            query(project, integrationQuestion(name, language), language, SearchMode.ADVANCED)
+        );
     }
 
     private DtoKnowledgeAnswer query(Project project, String question, String language, SearchMode mode) {
@@ -103,43 +118,96 @@ public class QuestionAskServiceImpl implements QuestionAskService {
             false,
             "",
             com.projectsknowledge.business.knowledge.schema.response.DtoWorkflowDiagram.empty(),
-            false
+            false,
+            null,
+            null
         );
     }
 
-    private DtoKnowledgeAnswer cachedAnswer(
-        ConcurrentHashMap<CacheKey, CacheEntry> cache,
+    /** Share concurrent work; refresh replaces the snapshot only after a successful analysis. */
+    private DtoKnowledgeAnswer resolve(
+        ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache,
         CacheKey key,
-        int ttlSeconds
+        int ttlSeconds,
+        boolean refresh,
+        Supplier<DtoKnowledgeAnswer> analyze
     ) {
-        if (ttlSeconds <= 0) return null;
-        CacheEntry entry = cache.get(key);
-        if (entry == null) return null;
-        if (entry.loadedAt().isBefore(Instant.now().minusSeconds(ttlSeconds))) {
-            cache.remove(key, entry);
+        boolean cacheEnabled = ttlSeconds > 0 && properties.getCodex().getAnswerCacheMaxEntries() > 0;
+        if (!refresh && cacheEnabled) {
+            DtoKnowledgeAnswer cached = cachedAnswer(cache, key);
+            if (cached != null) return cached;
+        }
+        var pending = new CompletableFuture<DtoKnowledgeAnswer>();
+        var existing = inFlight.putIfAbsent(key, pending);
+        if (existing != null) {
+            try {
+                return existing.join();
+            } catch (CompletionException failure) {
+                if (failure.getCause() instanceof RuntimeException cause) throw cause;
+                throw failure;
+            }
+        }
+        try {
+            // Another request may have completed between the first cache lookup and acquiring this slot.
+            DtoKnowledgeAnswer answer = !refresh && cacheEnabled ? cachedAnswer(cache, key) : null;
+            if (answer == null) {
+                DtoKnowledgeAnswer result = analyze.get();
+                Instant completedAt = clock.instant();
+                answer = result
+                    .toBuilder()
+                    .updatedAt(completedAt)
+                    .expiresAt(cacheEnabled ? completedAt.plusSeconds(ttlSeconds) : null)
+                    .build();
+                if (cacheEnabled) cacheAnswer(cache, key, answer);
+            }
+            pending.complete(answer);
+            return answer;
+        } catch (RuntimeException | Error failure) {
+            pending.completeExceptionally(failure);
+            throw failure;
+        } finally {
+            inFlight.remove(key, pending);
+        }
+    }
+
+    private DtoKnowledgeAnswer cachedAnswer(ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache, CacheKey key) {
+        DtoKnowledgeAnswer answer = cache.get(key);
+        if (answer != null && !clock.instant().isBefore(answer.expiresAt())) {
+            cache.remove(key, answer);
             return null;
         }
-        return entry.answer();
+        return answer;
     }
 
     private void cacheAnswer(
-        ConcurrentHashMap<CacheKey, CacheEntry> cache,
+        ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache,
         CacheKey key,
-        DtoKnowledgeAnswer answer,
-        int ttlSeconds
+        DtoKnowledgeAnswer answer
     ) {
-        int maxEntries = properties.getCodex().getAnswerCacheMaxEntries();
-        if (ttlSeconds <= 0 || maxEntries <= 0) return;
-        Instant validAfter = Instant.now().minusSeconds(ttlSeconds);
-        cache.entrySet().removeIf(entry -> entry.getValue().loadedAt().isBefore(validAfter));
-        if (cache.size() >= maxEntries) {
-            cache
-                .entrySet()
-                .stream()
-                .min(Comparator.comparing(entry -> entry.getValue().loadedAt()))
-                .ifPresent(entry -> cache.remove(entry.getKey(), entry.getValue()));
+        // Serialize only bounded cache maintenance, never the expensive model request.
+        synchronized (cache) {
+            Instant now = clock.instant();
+            cache.entrySet().removeIf(entry -> !now.isBefore(entry.getValue().expiresAt()));
+            if (!cache.containsKey(key) && cache.size() >= properties.getCodex().getAnswerCacheMaxEntries()) {
+                cache
+                    .entrySet()
+                    .stream()
+                    .min(Comparator.comparing(entry -> entry.getValue().updatedAt()))
+                    .ifPresent(entry -> cache.remove(entry.getKey(), entry.getValue()));
+            }
+            cache.put(key, answer);
         }
-        cache.put(key, new CacheEntry(Instant.now(), answer));
+    }
+
+    private CacheKey cacheKey(Project project, String language, String question, SearchMode mode, boolean integration) {
+        // Dynamic scope changes (including All Projects) must not reuse answers from old repository roots.
+        List<String> roots = project
+            .getRepositories()
+            .stream()
+            .map(repository -> repository.getPath().toAbsolutePath().normalize().toString())
+            .sorted()
+            .toList();
+        return new CacheKey(project.getId(), project.getName(), roots, language, question, mode, integration);
     }
 
     private String integrationQuestion(String name, String language) {
@@ -203,7 +271,13 @@ public class QuestionAskServiceImpl implements QuestionAskService {
         return Optional.empty();
     }
 
-    private record CacheKey(String projectId, String language, String question, SearchMode mode) {}
-
-    private record CacheEntry(Instant loadedAt, DtoKnowledgeAnswer answer) {}
+    private record CacheKey(
+        String projectId,
+        String projectName,
+        List<String> roots,
+        String language,
+        String question,
+        SearchMode mode,
+        boolean integration
+    ) {}
 }

@@ -8,5 +8,9 @@ import com.projectsknowledge.business.knowledge.schema.response.DtoKnowledgeAnsw
 public interface QuestionAskService {
     DtoKnowledgeAnswer ask(ReqQuestion request);
 
+    DtoKnowledgeAnswer refresh(ReqQuestion request);
+
     DtoKnowledgeAnswer explainIntegration(ReqIntegrationDetails request);
+
+    DtoKnowledgeAnswer refreshIntegration(ReqIntegrationDetails request);
 }

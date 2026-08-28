@@ -20,6 +20,7 @@ import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicK
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoWorkflowKnowledgeResult;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,7 @@ class QuestionAskServiceTest {
         );
         ProjectRetrievalService projects = new StubProjectService(project);
         StubCodexClient codex = new StubCodexClient(result, properties);
-        QuestionAskService service = new QuestionAskServiceImpl(projects, codex, properties);
+        QuestionAskService service = new QuestionAskServiceImpl(projects, codex, properties, Clock.systemUTC());
 
         service.ask(new ReqQuestion("project", "Which framework?", "en"));
         service.ask(new ReqQuestion("project", "  WHICH   FRAMEWORK? ", "en"));
@@ -87,7 +88,12 @@ class QuestionAskServiceTest {
             true
         );
         StubCodexClient codex = new StubCodexClient(result, properties);
-        QuestionAskService service = new QuestionAskServiceImpl(new StubProjectService(project), codex, properties);
+        QuestionAskService service = new QuestionAskServiceImpl(
+            new StubProjectService(project),
+            codex,
+            properties,
+            Clock.systemUTC()
+        );
 
         service.explainIntegration(new ReqIntegrationDetails("project", "Example Billing", "en"));
         service.explainIntegration(new ReqIntegrationDetails("project", " example billing ", "en"));
@@ -107,7 +113,12 @@ class QuestionAskServiceTest {
                 true
             ).toKnowledgeResult();
         StubCodexClient codex = new StubCodexClient(result, properties);
-        QuestionAskService service = new QuestionAskServiceImpl(new StubProjectService(project()), codex, properties);
+        QuestionAskService service = new QuestionAskServiceImpl(
+            new StubProjectService(project()),
+            codex,
+            properties,
+            Clock.systemUTC()
+        );
 
         for (int repeat = 0; repeat < 2; repeat++) {
             service.ask(new ReqQuestion("project", "Which framework?", "en", SearchMode.BASIC));
@@ -160,7 +171,12 @@ class QuestionAskServiceTest {
             true
         ).toKnowledgeResult();
         var codex = new StubCodexClient(result, properties);
-        var service = new QuestionAskServiceImpl(new StubProjectService(project()), codex, properties);
+        var service = new QuestionAskServiceImpl(
+            new StubProjectService(project()),
+            codex,
+            properties,
+            Clock.systemUTC()
+        );
         var question = new ReqQuestion("project", "Explain order tables", "ar", SearchMode.DATABASE);
         var answer = service.ask(question);
         assertThat(answer.database()).containsExactly(table);
@@ -211,7 +227,8 @@ class QuestionAskServiceTest {
         var service = new QuestionAskServiceImpl(
             new StubProjectService(project()),
             new StubCodexClient(result, properties),
-            properties
+            properties,
+            Clock.systemUTC()
         );
         var answer = service.ask(new ReqQuestion("project", "How does review work?", "en", SearchMode.WORKFLOW));
         assertThat(answer.roles()).containsExactly(role);
@@ -237,7 +254,7 @@ class QuestionAskServiceTest {
     @Test
     void rejectsOutOfScopeContentInEveryModeAndLanguageAndCachesOnlyTheRefusal() throws Exception {
         ProjectsKnowledgeProperties properties = new ProjectsKnowledgeProperties();
-        var mapper = new ObjectMapper();
+        var mapper = new ObjectMapper().findAndRegisterModules();
         // Simulate a model that marks the request out of scope but still fills unrelated sections.
         var result = mapper.readValue(
             """
@@ -254,7 +271,12 @@ class QuestionAskServiceTest {
             DtoCodexKnowledgeResult.class
         );
         var codex = new StubCodexClient(result, properties);
-        var service = new QuestionAskServiceImpl(new StubProjectService(project()), codex, properties);
+        var service = new QuestionAskServiceImpl(
+            new StubProjectService(project()),
+            codex,
+            properties,
+            Clock.systemUTC()
+        );
         for (SearchMode mode : SearchMode.values())
             for (String language : List.of("ar", "en")) {
                 var question = new ReqQuestion("project", "What is the capital of France?", language, mode);
@@ -289,7 +311,8 @@ class QuestionAskServiceTest {
         var service = new QuestionAskServiceImpl(
             new StubProjectService(project()),
             new StubCodexClient(result, properties),
-            properties
+            properties,
+            Clock.systemUTC()
         );
         var answer = service.ask(new ReqQuestion("project", "Who approves requests?", "en", SearchMode.BASIC));
         assertThat(answer.inScope()).isTrue();
