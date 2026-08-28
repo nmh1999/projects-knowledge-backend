@@ -1,0 +1,41 @@
+# Build output
+/target/
+/out/
+/build/
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# Local IDE settings
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# Local operational configuration and credentials
+.env
+.env.*
+!.env.example
+/config/
+/application-local.*
+/src/main/resources/application-local.*
+/settings.xml
+.codex/
+.qa/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# The checked-in Maven wrapper JAR is required; do not ignore .mvn/.
