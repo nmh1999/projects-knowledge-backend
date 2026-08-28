@@ -23,6 +23,11 @@ public class ProjectRetrievalController {
         return ResponseEntity.ok(projectService.findAll());
     }
 
+    @PostMapping("/refresh")
+    public ResponseEntity<List<DtoProject>> refreshProjects() {
+        return ResponseEntity.ok(projectService.refreshProjects());
+    }
+
     @GetMapping("/{projectId}")
     public ResponseEntity<DtoProject> findById(@PathVariable String projectId) {
         return ResponseEntity.ok(projectService.findById(projectId));

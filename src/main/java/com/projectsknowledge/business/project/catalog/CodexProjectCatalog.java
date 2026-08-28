@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -25,7 +26,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-/** Builds the application project list from recent Codex workspaces and caches it briefly. */
+/** Caches the dynamically discovered project list until expiry or an explicit refresh. */
 @Service
 @RequiredArgsConstructor
 public class CodexProjectCatalog {
@@ -56,21 +57,35 @@ public class CodexProjectCatalog {
     );
     private final CodexAppServerClient client;
     private final ProjectsKnowledgeProperties properties;
+    private final Clock clock;
     private volatile Cache cache = new Cache(Instant.EPOCH, List.of());
 
     public List<Project> projects() {
+        return projects(false);
+    }
+
+    public List<Project> refresh() {
+        return projects(true);
+    }
+
+    private List<Project> projects(boolean refresh) {
         if (!properties.getCodex().isEnabled()) throw new KnowledgeException(
             HttpStatus.SERVICE_UNAVAILABLE,
             "Codex integration is disabled."
         );
-        Instant validAfter = Instant.now().minusSeconds(properties.getCodex().getProjectCacheSeconds());
-        if (cache.loadedAt().isAfter(validAfter)) return cache.projects();
+        Cache observed = cache;
+        if (!refresh && isFresh(observed)) return observed.projects();
         synchronized (this) {
-            if (cache.loadedAt().isAfter(validAfter)) return cache.projects();
+            // Concurrent refreshes share a successful reload; failures never discard the last snapshot.
+            if ((!refresh || cache != observed) && isFresh(cache)) return cache.projects();
             List<Project> projects = loadProjects();
-            cache = new Cache(Instant.now(), projects);
+            cache = new Cache(clock.instant(), projects);
             return projects;
         }
+    }
+
+    private boolean isFresh(Cache snapshot) {
+        return snapshot.loadedAt().isAfter(clock.instant().minusSeconds(properties.getCodex().getProjectCacheSeconds()));
     }
 
     private List<Project> loadProjects() {

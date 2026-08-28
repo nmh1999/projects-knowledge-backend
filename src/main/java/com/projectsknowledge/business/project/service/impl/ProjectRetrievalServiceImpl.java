@@ -27,6 +27,11 @@ public class ProjectRetrievalServiceImpl implements ProjectRetrievalService {
     }
 
     @Override
+    public List<DtoProject> refreshProjects() {
+        return codexProjectCatalog.refresh().stream().map(ProjectMapper::toSummaryDto).toList();
+    }
+
+    @Override
     public DtoProject findById(String projectId) {
         return overviews.get(requireProject(projectId));
     }

@@ -15,6 +15,20 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class ProjectRetrievalControllerTest {
 
     @Test
+    void catalogRefreshIsAnExplicitPostSeparateFromCachedListing() throws Exception {
+        var service = mock(ProjectRetrievalService.class);
+        when(service.findAll()).thenReturn(List.of());
+        when(service.refreshProjects()).thenReturn(List.of());
+        var mvc = MockMvcBuilders.standaloneSetup(new ProjectRetrievalController(service)).build();
+        mvc.perform(get("/api/projects")).andExpect(status().isOk()).andExpect(content().json("[]"));
+        verify(service).findAll();
+        verify(service, never()).refreshProjects();
+        mvc.perform(post("/api/projects/refresh")).andExpect(status().isOk()).andExpect(content().json("[]"));
+        verify(service).refreshProjects();
+        verifyNoMoreInteractions(service);
+    }
+
+    @Test
     void refreshUsesPostAndReturnsAnIsoTimestamp() throws Exception {
         var service = mock(ProjectRetrievalService.class);
         var snapshot = new DtoProject(

@@ -45,7 +45,7 @@ Operational defaults are in `src/main/resources/application.yml`. Override them 
 | --- | --- |
 | `SERVER_PORT` | `8090` |
 | `CODEX_COMMAND` | `codex.exe` (Windows); use `codex` on other systems |
-| Project catalog cache | 30 seconds |
+| Project catalog cache | 3,600 seconds (1 hour) |
 | Question answer cache | 900 seconds |
 | Integration detail cache | 18,000 seconds (5 hours) |
 | Project overview cache | 18,000 seconds (5 hours) |
@@ -55,6 +55,7 @@ Projects and repository roots come dynamically from Codex workspaces. This backe
 ## API
 
 - `GET /api/projects`: list available projects without model analysis.
+- `POST /api/projects/refresh`: bypass the catalog cache and reload available projects without model analysis; overview caches are unchanged.
 - `GET /api/projects/{id}`: get the analyzed, cached project overview.
 - `POST /api/projects/{id}/overview/refresh`: run a fresh overview analysis.
 - `POST /api/questions`: submit a question.

@@ -63,4 +63,20 @@ class ProjectRetrievalServiceTest {
         assertThatThrownBy(service::findAll).isInstanceOf(KnowledgeException.class).hasMessage("Unavailable");
         assertThatThrownBy(() -> service.requireProject("all")).isInstanceOf(KnowledgeException.class);
     }
+
+    @Test
+    void refreshingTheCatalogNeverStartsOverviewAnalysis() {
+        var catalog = mock(CodexProjectCatalog.class);
+        var overviews = mock(ProjectOverviewService.class);
+        var project = new Project();
+        project.setId("fresh");
+        project.setName("New project");
+        project.setRepositories(List.of());
+        when(catalog.refresh()).thenReturn(List.of(project));
+        var service = new ProjectRetrievalServiceImpl(overviews, catalog);
+        assertThat(service.refreshProjects()).extracting(value -> value.id()).containsExactly("fresh");
+        verify(catalog).refresh();
+        verifyNoMoreInteractions(catalog);
+        verifyNoInteractions(overviews);
+    }
 }

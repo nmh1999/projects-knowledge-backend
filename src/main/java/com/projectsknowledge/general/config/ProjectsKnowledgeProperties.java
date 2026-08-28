@@ -32,7 +32,7 @@ public class ProjectsKnowledgeProperties {
             ? "codex.exe"
             : "codex";
         private int timeoutSeconds = 300;
-        private int projectCacheSeconds = 30;
+        private int projectCacheSeconds = 3_600;
         private int answerCacheSeconds = 900;
         private int integrationCacheSeconds = 18_000;
         private int overviewCacheSeconds = 18_000;

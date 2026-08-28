@@ -9,6 +9,8 @@ import java.util.List;
 public interface ProjectRetrievalService {
     List<DtoProject> findAll();
 
+    List<DtoProject> refreshProjects();
+
     DtoProject findById(String projectId);
 
     DtoProject refreshOverview(String projectId);
