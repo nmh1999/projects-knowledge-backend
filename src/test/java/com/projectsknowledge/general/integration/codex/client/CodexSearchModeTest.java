@@ -201,7 +201,102 @@ class CodexSearchModeTest {
     }
 
     @Test
+    void databaseSchemaOnlyRequestsRelevantBoundedSections() {
+        var schema = client.outputSchema(SearchMode.DATABASE);
+        var fields = new ArrayList<String>();
+        schema.path("properties").fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder(
+            "inScope",
+            "answer",
+            "confidence",
+            "keyFindings",
+            "database",
+            "risks",
+            "sources"
+        );
+        assertThat(schema.path("required").size()).isEqualTo(fields.size());
+        assertThat(schema.path("additionalProperties").asBoolean()).isFalse();
+        assertThat(schema.at("/properties/database/maxItems").asInt()).isEqualTo(6);
+        assertThat(schema.at("/properties/sources/maxItems").asInt()).isEqualTo(6);
+        var table = schema.at("/properties/database/items");
+        assertThat(table.path("required").size()).isEqualTo(6);
+        assertThat(table.path("additionalProperties").asBoolean()).isFalse();
+        assertThat(table.at("/properties/columns/maxItems").asInt()).isEqualTo(8);
+        assertThat(table.at("/properties/relationships/maxItems").asInt()).isEqualTo(6);
+        assertThat(
+            client.outputSchema(SearchMode.ADVANCED).at("/properties/database/items/properties").has("columns")
+        ).isFalse();
+        assertThat(client.instructions(SearchMode.DATABASE))
+            .contains(CodexAppServerClient.SUMMARY_INSTRUCTIONS, CodexAppServerClient.INVESTIGATION_INSTRUCTIONS)
+            .contains("DATABASE mode", "ORM-only associations", "Never connect to a database", "execute SQL")
+            .contains("no database evidence", "Never infer physical table names", "Do not generate SQL scripts")
+            .endsWith(client.databaseInstructions());
+    }
+
+    @Test
+    void databaseResultPreservesSchemaDetailsAndEmptiesUnrelatedSections() throws Exception {
+        var result = client.parseAnswer(
+            """
+            {"inScope":true,"answer":"Orders reference customers.","confidence":"high",
+             "keyFindings":["OrderStore loads orders by customer_id."],
+             "database":[{"table":"orders","entity":"Order","repository":"OrderStore",
+               "purpose":"Stores orders.","columns":["id: bigint, primary key"],
+               "relationships":["DDL: orders.customer_id -> customers.id; many-to-one"]}],
+             "risks":["Deployed state not checked."],
+             "sources":[{"repositoryName":"sample","filePath":"schema.sql","symbol":"orders",
+               "startLine":1,"endLine":12,"excerpt":"CREATE TABLE orders"}]}
+            """,
+            SearchMode.DATABASE
+        );
+        assertThat(result.database()).hasSize(1);
+        assertThat(result.database().getFirst().columns()).containsExactly("id: bigint, primary key");
+        assertThat(result.database().getFirst().relationships()).containsExactly(
+            "DDL: orders.customer_id -> customers.id; many-to-one"
+        );
+        assertThat(result.keyFindings()).containsExactly("OrderStore loads orders by customer_id.");
+        assertThat(result.sources()).hasSize(1);
+        assertThat(result.risks()).containsExactly("Deployed state not checked.");
+        assertThat(result.businessFlow()).isEmpty();
+        assertThat(result.technicalFlow()).isEmpty();
+        assertThat(result.technicalDetails()).isEmpty();
+        assertThat(result.apis()).isEmpty();
+        assertThat(result.roles()).isEmpty();
+        assertThat(result.integrations()).isEmpty();
+        assertThat(result.scheduledJobs()).isEmpty();
+        assertThat(result.followUpQuestions()).isEmpty();
+        assertThat(result.workflowExample()).isEmpty();
+        assertThat(result.workflowDiagram().nodes()).isEmpty();
+    }
+
+    @Test
+    void databaseMissingEvidenceAndOlderAdvancedTablesRemainCompatible() throws Exception {
+        var missing = client.parseAnswer(
+            """
+            {"inScope":true,"answer":"No database schema found.","confidence":"low"}
+            """,
+            SearchMode.DATABASE
+        );
+        assertThat(missing.inScope()).isTrue();
+        assertThat(missing.database()).isEmpty();
+        assertThat(missing.sources()).isEmpty();
+        assertThat(missing.keyFindings()).isEmpty();
+        assertThat(missing.risks()).isEmpty();
+        var advanced = client.parseAnswer(
+            """
+            {"inScope":true,"answer":"Stores orders.","confidence":"high",
+             "database":[{"table":"orders","entity":"Order","repository":"OrderStore","purpose":"Stores orders."}]}
+            """,
+            SearchMode.ADVANCED
+        );
+        assertThat(advanced.database().getFirst().columns()).isEmpty();
+        assertThat(advanced.database().getFirst().relationships()).isEmpty();
+    }
+
+    @Test
     void requestAcceptsModesAndPreservesLegacyDefault() throws Exception {
+        assertThat(
+            mapper.readValue("{\"projectId\":\"p\",\"question\":\"q\",\"mode\":\"database\"}", ReqQuestion.class).mode()
+        ).isEqualTo(SearchMode.DATABASE);
         assertThat(
             mapper.readValue("{\"projectId\":\"p\",\"question\":\"q\",\"mode\":\"workflow\"}", ReqQuestion.class).mode()
         ).isEqualTo(SearchMode.WORKFLOW);

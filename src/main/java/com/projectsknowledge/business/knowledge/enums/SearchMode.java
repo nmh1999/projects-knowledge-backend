@@ -9,4 +9,6 @@ public enum SearchMode {
     ADVANCED,
     @JsonProperty("workflow")
     WORKFLOW,
+    @JsonProperty("database")
+    DATABASE,
 }

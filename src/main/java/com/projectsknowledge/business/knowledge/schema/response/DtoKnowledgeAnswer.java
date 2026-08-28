@@ -30,7 +30,20 @@ public record DtoKnowledgeAnswer(
 
     public record ApiInfo(String method, String path, String controller, String methodName, String purpose) {}
 
-    public record DatabaseInfo(String table, String entity, String repository, String purpose) {}
+    /** Database mode adds schema details; older Advanced results keep these lists empty. */
+    public record DatabaseInfo(
+        String table,
+        String entity,
+        String repository,
+        String purpose,
+        List<String> columns,
+        List<String> relationships
+    ) {
+        public DatabaseInfo {
+            columns = columns == null ? List.of() : List.copyOf(columns);
+            relationships = relationships == null ? List.of() : List.copyOf(relationships);
+        }
+    }
 
     public record IntegrationInfo(String name, String usedBy, String purpose) {}
 

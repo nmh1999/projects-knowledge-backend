@@ -92,7 +92,9 @@ Use a project ID returned by `/api/projects`, or `all` for the combined scope. A
 }
 ```
 
-Supported languages: `en`, `ar`. Modes: `basic` (summary), `advanced` (technical details and sources), `workflow` (roles, steps, example and diagram). The frontend defaults to Basic; omitting the API mode retains Advanced behavior. Answers are cached separately by project/repositories, question, language and mode.
+Supported languages: `en`, `ar`. Modes: `basic` (summary), `advanced` (technical details and sources), `workflow` (roles, steps, example and diagram), `database` (tables, relevant columns, keys, relationships and data access). The frontend defaults to Basic; omitting the API mode retains Advanced behavior. Answers are cached separately by project/repositories, question, language and mode.
+
+Database mode inspects repository schema/migrations and data-access code, not a live database. Its dedicated output contains a summary, key findings, up to 6 tables with relevant columns/relationships, caveats and source evidence. It does not execute SQL, generate scripts or request unrelated API/workflow sections. Missing physical names and constraints must remain unverified. The extra `database[].columns` and `database[].relationships` lists default to empty for older Advanced results. The Codex effort stays `medium`.
 
 ## Security and scope
 

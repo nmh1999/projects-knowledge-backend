@@ -48,6 +48,22 @@ class KnowledgeApiContractTest {
     }
 
     @Test
+    void acceptsDatabaseModeWithoutChangingTheEndpoint() throws Exception {
+        mvc
+            .perform(
+                post("/api/questions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"projectId":"sample","question":"Explain order tables","language":"ar","mode":"database"}
+                        """
+                    )
+            )
+            .andExpect(status().isOk());
+        verify(service).ask(new ReqQuestion("sample", "Explain order tables", "ar", SearchMode.DATABASE));
+    }
+
+    @Test
     void rejectsBlankQuestionsBeforeTheServiceIsCalled() throws Exception {
         mvc
             .perform(

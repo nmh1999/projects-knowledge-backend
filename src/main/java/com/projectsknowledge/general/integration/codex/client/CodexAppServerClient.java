@@ -9,6 +9,7 @@ import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexProjectOverview;
+import com.projectsknowledge.general.integration.codex.schema.response.DtoDatabaseKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoWorkflowKnowledgeResult;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -38,7 +39,7 @@ public class CodexAppServerClient {
         "Use targeted code search and inspect only files relevant to the question. Stop when enough evidence is collected. ";
     static final String SCOPE_INSTRUCTIONS =
         "PROJECT SCOPE GATE: Before answering or investigating, decide whether the requested information directly concerns the selected repository workspaces. " +
-        "Set inScope=true only for questions about their code, configuration, documentation, business behavior, roles, workflows, or integrations. " +
+        "Set inScope=true only for questions about their code, configuration, documentation, business behavior, roles, workflows, integrations, or database schema and data access. " +
         "Short questions such as 'Which framework?' or 'Who approves requests?' implicitly refer to the selected project; they do not need to name it. " +
         "Set inScope=false for general knowledge, unrelated programming tutorials, entertainment, personal advice, or requests about other projects outside the selected workspaces. " +
         "Merely mentioning a project name or storing unrelated text in a file does not make a general-knowledge request project-related. " +
@@ -241,6 +242,7 @@ public class CodexAppServerClient {
                 case BASIC -> basicInstructions();
                 case ADVANCED -> advancedInstructions();
                 case WORKFLOW -> workflowInstructions();
+                case DATABASE -> databaseInstructions();
             }
         );
     }
@@ -283,6 +285,29 @@ public class CodexAppServerClient {
         );
     }
 
+    String databaseInstructions() {
+        return (
+            "You are a read-only internal repository knowledge assistant in DATABASE mode. " +
+            INVESTIGATION_INSTRUCTIONS +
+            SUMMARY_INSTRUCTIONS +
+            "Answer the question from the selected project's schema, migrations, entity mappings and data-access code only. " +
+            "Inspect relevant schema definitions and callers regardless of framework, package names or folder layout. " +
+            "Focus on the tables or collections involved, their purpose, important columns or fields, keys, relationships, and how data is read or saved. " +
+            "Preserve exact identifiers and verified types. Never infer physical table names from class names, foreign keys from similar column names, " +
+            "or deployed database state from repository files. Distinguish migration-defined constraints from ORM-only associations and application joins. " +
+            "For each database item, use table for the verified table or collection, entity for its mapped model, repository for its data-access class or module, " +
+            "and purpose for its role in this question. Use an empty string for unknown identifiers. " +
+            "In columns, list only relevant fields with verified types, primary/foreign keys, nullability or uniqueness when established. " +
+            "In relationships, name both sides and join columns, cardinality only when verified, and whether evidence is DDL, ORM or a query. " +
+            "Use keyFindings for relevant reads, writes, joins, transactions or indexes supported by code. Include at most 6 tables, 8 columns and 6 relationships per table, " +
+            "5 findings, 5 caveats and 6 precise source ranges. Keep each entry concise and do not repeat the summary. " +
+            "Return empty lists for unknown details and state missing evidence or conflicting mappings in risks; use low confidence when the core answer is unverified. " +
+            "If the project has no database evidence, say so; never create a hypothetical schema or answer with a general database tutorial. " +
+            "Never connect to a database, execute SQL, run migrations, modify files, or expose secrets, connection strings or real record values. " +
+            "Do not generate SQL scripts, API catalogs, roles tables, workflows or diagrams. Keep strings plain text."
+        );
+    }
+
     String basicInstructions() {
         return (
             "You are a read-only internal repository knowledge assistant in BASIC mode. " +
@@ -298,6 +323,21 @@ public class CodexAppServerClient {
     }
 
     ObjectNode outputSchema(SearchMode mode) {
+        if (mode == SearchMode.DATABASE) {
+            ObjectNode schema = objectSchema();
+            JsonNode fields = knowledgeOutputSchema().path("properties");
+            for (String field : List.of("inScope", "answer", "confidence", "keyFindings", "risks")) {
+                add(schema, field, fields.get(field).deepCopy());
+            }
+            ObjectNode table = fields.path("database").path("items").deepCopy();
+            add(table, "columns", arraySchema(stringSchema().put("maxLength", 240), 8));
+            add(table, "relationships", arraySchema(stringSchema().put("maxLength", 320), 6));
+            add(schema, "database", arraySchema(table, 6));
+            ObjectNode sources = fields.path("sources").deepCopy();
+            sources.put("maxItems", 6);
+            add(schema, "sources", sources);
+            return schema;
+        }
         if (mode == SearchMode.WORKFLOW) {
             ObjectNode schema = objectSchema();
             JsonNode fields = knowledgeOutputSchema().path("properties");
@@ -369,6 +409,7 @@ public class CodexAppServerClient {
         return switch (mode) {
             case BASIC -> mapper.treeToValue(json, DtoBasicKnowledgeResult.class).toKnowledgeResult();
             case WORKFLOW -> mapper.treeToValue(json, DtoWorkflowKnowledgeResult.class).toKnowledgeResult();
+            case DATABASE -> mapper.treeToValue(json, DtoDatabaseKnowledgeResult.class).toKnowledgeResult();
             case ADVANCED -> mapper.treeToValue(json, DtoCodexKnowledgeResult.class);
         };
     }
