@@ -8,6 +8,8 @@ import static org.mockito.Mockito.*;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.schema.response.DtoProject;
 import com.projectsknowledge.business.project.service.ProjectOverviewService;
+import com.projectsknowledge.general.cancellation.RequestCancellation;
+import com.projectsknowledge.general.cancellation.RequestCancelledException;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
@@ -68,6 +70,30 @@ class ProjectOverviewServiceTest {
             List.of(),
             List.of()
         );
+    }
+
+    @Test
+    void cancelledRefreshKeepsThePreviousOverviewAndDate() throws Exception {
+        var old = service.get(project);
+        var started = new CountDownLatch(1);
+        var stopped = new CountDownLatch(1);
+        when(client.overview(anyList())).thenAnswer(call -> {
+            started.countDown();
+            try {
+                return RequestCancellation.await(new CompletableFuture<>());
+            } finally {
+                stopped.countDown();
+            }
+        });
+        var token = new RequestCancellation();
+        var pending = CompletableFuture.supplyAsync(() ->
+            RequestCancellation.with(token, () -> service.refresh(project))
+        );
+        assertThat(started.await(3, TimeUnit.SECONDS)).isTrue();
+        token.cancel();
+        assertThatThrownBy(() -> pending.get(3, TimeUnit.SECONDS)).hasCauseInstanceOf(RequestCancelledException.class);
+        assertThat(stopped.await(3, TimeUnit.SECONDS)).isTrue();
+        assertThat(service.get(project)).isSameAs(old);
     }
 
     @Test
@@ -235,7 +261,7 @@ class ProjectOverviewServiceTest {
                 // Wait until the second caller is actually joining the in-flight future, not merely scheduled.
                 await()
                     .atMost(Duration.ofSeconds(3))
-                    .until(() -> secondThread.getState() == Thread.State.WAITING);
+                    .until(() -> secondThread.getState() == Thread.State.TIMED_WAITING);
                 release.countDown();
                 var refreshed = first.get(5, TimeUnit.SECONDS);
                 assertThat(secondResult.get(5, TimeUnit.SECONDS)).isSameAs(refreshed);

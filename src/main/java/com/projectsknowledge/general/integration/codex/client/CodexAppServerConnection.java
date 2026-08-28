@@ -3,6 +3,8 @@ package com.projectsknowledge.general.integration.codex.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.projectsknowledge.general.cancellation.RequestCancellation;
+import com.projectsknowledge.general.cancellation.RequestCancelledException;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -97,6 +99,7 @@ final class CodexAppServerConnection implements AutoCloseable {
         if (turns.putIfAbsent(threadId, turn) != null) throw failure("A turn is already active for this conversation.");
         long deadline = System.nanoTime() + timeout.toNanos();
         try {
+            RequestCancellation.check();
             JsonNode accepted = request("turn/start", params, remaining(deadline));
             String turnId = accepted.path("turn").path("id").asText();
             if (turnId.isBlank()) {
@@ -104,9 +107,50 @@ final class CodexAppServerConnection implements AutoCloseable {
                 throw failure("Codex returned a missing turn identifier.");
             }
             turn.bind(turnId);
-            return await(turn.answer, remaining(deadline));
+            try {
+                return awaitTurn(turn.answer, deadline);
+            } catch (RequestCancelledException cancelled) {
+                interruptTurn(threadId, turnId, turn);
+                throw cancelled;
+            }
         } finally {
             turns.remove(threadId, turn);
+        }
+    }
+
+    /** Interrupt only this turn; other requests keep using the shared connection. */
+    private void interruptTurn(String threadId, String turnId, TurnResult turn) {
+        if (turn.finished.isDone()) return;
+        try {
+            request("turn/interrupt", Map.of("threadId", threadId, "turnId", turnId), Duration.ofSeconds(2));
+            await(turn.finished, Duration.ofSeconds(2));
+        } catch (RuntimeException failure) {
+            // If interruption cannot be confirmed, do not leave an owned model process running indefinitely.
+            if (!turn.finished.isDone()) fail("Codex connection was reset after cancellation failed.");
+        }
+    }
+
+    private String awaitTurn(CompletableFuture<String> answer, long deadline) {
+        while (true) {
+            RequestCancellation.check();
+            if (answer.isDone() || System.nanoTime() >= deadline) return await(answer, remaining(deadline));
+            try {
+                String result = answer.get(
+                    Math.min(TimeUnit.MILLISECONDS.toNanos(100), remaining(deadline).toNanos()),
+                    TimeUnit.NANOSECONDS
+                );
+                RequestCancellation.check();
+                return result;
+            } catch (TimeoutException ignored) {
+                // Poll the request token without interrupting the shared RPC reader or writer.
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new RequestCancelledException();
+            } catch (ExecutionException exception) {
+                RequestCancellation.check();
+                if (exception.getCause() instanceof KnowledgeException known) throw known;
+                throw failure("Codex request failed.");
+            }
         }
     }
 
@@ -235,7 +279,12 @@ final class CodexAppServerConnection implements AutoCloseable {
             writer.interrupt();
             KnowledgeException error = failure(message);
             requests.values().forEach(request -> request.completeExceptionally(error));
-            turns.values().forEach(turn -> turn.answer.completeExceptionally(error));
+            turns
+                .values()
+                .forEach(turn -> {
+                    turn.answer.completeExceptionally(error);
+                    turn.finished.completeExceptionally(error);
+                });
             requests.clear();
             turns.clear();
             terminated.complete(null);
@@ -260,6 +309,7 @@ final class CodexAppServerConnection implements AutoCloseable {
     private static final class TurnResult {
 
         private final CompletableFuture<String> answer = new CompletableFuture<>();
+        private final CompletableFuture<Void> finished = new CompletableFuture<>();
         private final List<Event> earlyEvents = new ArrayList<>();
         private String turnId;
         private String finalText = "";
@@ -289,6 +339,7 @@ final class CodexAppServerConnection implements AutoCloseable {
                 ? params.path("turn").path("id").asText()
                 : params.path("turnId").asText();
             if (!turnId.equals(eventTurn)) return;
+            if ("turn/completed".equals(method)) finished.complete(null);
             if ("item/completed".equals(method)) {
                 finalText = params.path("item").path("text").asText("");
             } else if (!"completed".equals(params.path("turn").path("status").asText())) {

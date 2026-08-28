@@ -10,6 +10,8 @@ import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
+import com.projectsknowledge.general.cancellation.RequestCancellation;
+import com.projectsknowledge.general.cancellation.RequestCancelledException;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
@@ -72,6 +74,34 @@ class QuestionAnswerCacheTest {
         when(clock.instant()).thenReturn(first.expiresAt());
         service.ask(request);
         verify(client, times(2)).ask(anyList(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void cancelledRefreshStopsSharedWorkAndPreservesTheCachedAnswer() throws Exception {
+        var old = service.ask(question);
+        var started = new CountDownLatch(1);
+        var stopped = new CountDownLatch(1);
+        when(client.ask(anyList(), anyString(), anyString(), any())).thenAnswer(call -> {
+            started.countDown();
+            try {
+                return RequestCancellation.await(new CompletableFuture<>());
+            } finally {
+                stopped.countDown();
+            }
+        });
+        var token = new RequestCancellation();
+        var pending = CompletableFuture.supplyAsync(() ->
+            RequestCancellation.with(token, () -> service.refresh(question))
+        );
+        assertThat(started.await(3, TimeUnit.SECONDS)).isTrue();
+        token.cancel();
+        assertThatThrownBy(() -> pending.get(3, TimeUnit.SECONDS)).hasCauseInstanceOf(RequestCancelledException.class);
+        assertThat(stopped.await(3, TimeUnit.SECONDS)).isTrue();
+        assertThat(service.ask(question)).isSameAs(old);
+        doReturn(new DtoBasicKnowledgeResult("Retry", "high", true).toKnowledgeResult())
+            .when(client)
+            .ask(anyList(), anyString(), anyString(), any());
+        assertThat(service.refresh(question).summary()).isEqualTo("Retry");
     }
 
     @Test
@@ -156,7 +186,7 @@ class QuestionAnswerCacheTest {
         try {
             await()
                 .atMost(Duration.ofSeconds(3))
-                .until(() -> waiter.getState() == Thread.State.WAITING);
+                .until(() -> waiter.getState() == Thread.State.TIMED_WAITING);
             assertThat(service.ask(question)).isSameAs(old);
         } finally {
             release.countDown();

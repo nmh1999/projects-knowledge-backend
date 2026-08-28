@@ -3,6 +3,7 @@ package com.projectsknowledge.business.project.catalog;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.enums.RepositoryType;
+import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
@@ -69,6 +70,7 @@ public class CodexProjectCatalog {
     }
 
     private List<Project> projects(boolean refresh) {
+        RequestCancellation.check();
         if (!properties.getCodex().isEnabled()) throw new KnowledgeException(
             HttpStatus.SERVICE_UNAVAILABLE,
             "Codex integration is disabled."
@@ -76,16 +78,19 @@ public class CodexProjectCatalog {
         Cache observed = cache;
         if (!refresh && isFresh(observed)) return observed.projects();
         synchronized (this) {
+            RequestCancellation.check();
             // Concurrent refreshes share a successful reload; failures never discard the last snapshot.
             if ((!refresh || cache != observed) && isFresh(cache)) return cache.projects();
             List<Project> projects = loadProjects();
-            cache = new Cache(clock.instant(), projects);
+            RequestCancellation.publish(() -> cache = new Cache(clock.instant(), projects));
             return projects;
         }
     }
 
     private boolean isFresh(Cache snapshot) {
-        return snapshot.loadedAt().isAfter(clock.instant().minusSeconds(properties.getCodex().getProjectCacheSeconds()));
+        return snapshot
+            .loadedAt()
+            .isAfter(clock.instant().minusSeconds(properties.getCodex().getProjectCacheSeconds()));
     }
 
     private List<Project> loadProjects() {
@@ -105,6 +110,7 @@ public class CodexProjectCatalog {
     }
 
     private Project toProject(Path workspace) {
+        RequestCancellation.check();
         Project project = new Project();
         project.setId("codex-" + digest(key(workspace)).substring(0, 16));
         project.setName(workspace.getFileName() == null ? workspace.toString() : workspace.getFileName().toString());

@@ -7,6 +7,8 @@ import com.projectsknowledge.business.project.schema.response.DtoProject;
 import com.projectsknowledge.business.project.schema.response.DtoProjectOverview;
 import com.projectsknowledge.business.project.schema.response.DtoRepository;
 import com.projectsknowledge.business.project.service.ProjectOverviewService;
+import com.projectsknowledge.general.cancellation.RequestCancellation;
+import com.projectsknowledge.general.cancellation.SharedAnalysis;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
@@ -23,9 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -40,7 +39,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
     private final ProjectsKnowledgeProperties properties;
     private final Clock clock;
     private final Map<CacheKey, CacheEntry> cache = new LinkedHashMap<>(16, .75f, true);
-    private final ConcurrentHashMap<CacheKey, CompletableFuture<DtoProject>> inFlight = new ConcurrentHashMap<>();
+    private final SharedAnalysis<CacheKey, DtoProject> inFlight = new SharedAnalysis<>();
 
     @Override
     public DtoProject get(Project project) {
@@ -53,6 +52,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
     }
 
     private DtoProject load(Project project, boolean forceRefresh) {
+        RequestCancellation.check();
         CacheKey key = new CacheKey(
             project.getId(),
             project.getName(),
@@ -74,28 +74,12 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
         if (cached != null) return cached;
 
         // Concurrent opens of the same project share a model call; unrelated projects do not block each other.
-        CompletableFuture<DtoProject> request = new CompletableFuture<>();
-        CompletableFuture<DtoProject> existing = inFlight.putIfAbsent(key, request);
-        if (existing != null) {
-            try {
-                return existing.join();
-            } catch (CompletionException exception) {
-                if (exception.getCause() instanceof RuntimeException cause) throw cause;
-                throw exception;
-            }
-        }
-        try {
-            cached = forceRefresh ? null : cached(key); // Manual refresh bypasses valid cache but shares an in-flight analysis.
-            DtoProject result = cached != null ? cached : build(project);
-            if (cached == null) remember(key, result);
-            request.complete(result);
+        return inFlight.run(key, () -> {
+            DtoProject snapshot = forceRefresh ? null : cached(key);
+            DtoProject result = snapshot != null ? snapshot : build(project);
+            if (snapshot == null) RequestCancellation.publish(() -> remember(key, result));
             return result;
-        } catch (RuntimeException | Error exception) {
-            request.completeExceptionally(exception);
-            throw exception; // Preserve the previous successful snapshot when manual refresh fails.
-        } finally {
-            inFlight.remove(key, request);
-        }
+        });
     }
 
     private DtoProject build(Project project) {
@@ -119,6 +103,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
         List<DtoRepository> repositoryDtos = repositories
             .stream()
             .map(repo -> {
+                RequestCancellation.check();
                 scanner.invalidateFiles(repo);
                 var metadata = scanner.metadata(repo);
                 return new DtoRepository(

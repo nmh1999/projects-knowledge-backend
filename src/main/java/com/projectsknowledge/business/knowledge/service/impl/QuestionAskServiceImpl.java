@@ -10,6 +10,8 @@ import com.projectsknowledge.business.knowledge.service.QuestionAskService;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
+import com.projectsknowledge.general.cancellation.RequestCancellation;
+import com.projectsknowledge.general.cancellation.SharedAnalysis;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
@@ -21,8 +23,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -40,8 +40,7 @@ public class QuestionAskServiceImpl implements QuestionAskService {
     // The cache avoids a second Codex turn for the same normalized question and is bounded by configuration.
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> answerCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> integrationCache = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<CacheKey, CompletableFuture<DtoKnowledgeAnswer>> inFlight =
-        new ConcurrentHashMap<>();
+    private final SharedAnalysis<CacheKey, DtoKnowledgeAnswer> inFlight = new SharedAnalysis<>();
 
     @Override
     public DtoKnowledgeAnswer ask(ReqQuestion request) {
@@ -132,42 +131,29 @@ public class QuestionAskServiceImpl implements QuestionAskService {
         boolean refresh,
         Supplier<DtoKnowledgeAnswer> analyze
     ) {
+        RequestCancellation.check();
         boolean cacheEnabled = ttlSeconds > 0 && properties.getCodex().getAnswerCacheMaxEntries() > 0;
         if (!refresh && cacheEnabled) {
             DtoKnowledgeAnswer cached = cachedAnswer(cache, key);
             if (cached != null) return cached;
         }
-        var pending = new CompletableFuture<DtoKnowledgeAnswer>();
-        var existing = inFlight.putIfAbsent(key, pending);
-        if (existing != null) {
-            try {
-                return existing.join();
-            } catch (CompletionException failure) {
-                if (failure.getCause() instanceof RuntimeException cause) throw cause;
-                throw failure;
-            }
-        }
-        try {
+        return inFlight.run(key, () -> {
             // Another request may have completed between the first cache lookup and acquiring this slot.
             DtoKnowledgeAnswer answer = !refresh && cacheEnabled ? cachedAnswer(cache, key) : null;
             if (answer == null) {
                 DtoKnowledgeAnswer result = analyze.get();
+                RequestCancellation.check();
                 Instant completedAt = clock.instant();
                 answer = result
                     .toBuilder()
                     .updatedAt(completedAt)
                     .expiresAt(cacheEnabled ? completedAt.plusSeconds(ttlSeconds) : null)
                     .build();
-                if (cacheEnabled) cacheAnswer(cache, key, answer);
+                DtoKnowledgeAnswer snapshot = answer;
+                if (cacheEnabled) RequestCancellation.publish(() -> cacheAnswer(cache, key, snapshot));
             }
-            pending.complete(answer);
             return answer;
-        } catch (RuntimeException | Error failure) {
-            pending.completeExceptionally(failure);
-            throw failure;
-        } finally {
-            inFlight.remove(key, pending);
-        }
+        });
     }
 
     private DtoKnowledgeAnswer cachedAnswer(ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache, CacheKey key) {

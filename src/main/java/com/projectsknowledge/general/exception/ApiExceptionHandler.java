@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -15,7 +16,7 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(exception.getStatus()).body(error(exception.getMessage()));
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ExceptionHandler({ MethodArgumentNotValidException.class, MethodArgumentTypeMismatchException.class })
     ResponseEntity<Map<String, Object>> handleValidation() {
         return ResponseEntity.badRequest().body(error("The request is invalid."));
     }

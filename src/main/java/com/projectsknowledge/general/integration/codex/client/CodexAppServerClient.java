@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
+import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
@@ -55,6 +56,7 @@ public class CodexAppServerClient {
     private final CodexAppServerTransport transport;
 
     public List<CodexThread> listThreads() {
+        RequestCancellation.check();
         JsonNode result = transport
             .connection()
             .request(
@@ -63,6 +65,7 @@ public class CodexAppServerClient {
                 setupTimeout()
             );
         List<CodexThread> threads = new ArrayList<>();
+        RequestCancellation.check();
         for (JsonNode thread : result.path("data")) {
             String cwd = thread.path("cwd").asText("");
             if (!cwd.isBlank()) threads.add(new CodexThread(Path.of(cwd), thread.path("updatedAt").asLong(0)));
@@ -106,6 +109,7 @@ public class CodexAppServerClient {
 
     // Questions and overview discovery use the same read-only transport, without additional model turns.
     private String runTurn(List<Path> workspaceRoots, String prompt, String developerInstructions, ObjectNode schema) {
+        RequestCancellation.check();
         if (workspaceRoots.isEmpty()) throw new KnowledgeException(
             HttpStatus.BAD_REQUEST,
             "The selected Codex project has no readable workspace."
@@ -127,6 +131,7 @@ public class CodexAppServerClient {
             startParams.put("approvalPolicy", "never");
             startParams.put("ephemeral", true);
             startParams.put("developerInstructions", developerInstructions);
+            RequestCancellation.check();
             JsonNode threadResult = connection.request("thread/start", startParams, setupTimeout());
             threadId = threadResult.path("thread").path("id").asText();
             if (threadId.isBlank()) {
@@ -146,6 +151,7 @@ public class CodexAppServerClient {
                 turnParams,
                 Duration.ofSeconds(Math.max(1, properties.getCodex().getTimeoutSeconds()))
             );
+            RequestCancellation.check();
             completed = true;
             return answer;
         } finally {

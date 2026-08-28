@@ -98,6 +98,14 @@ Supported languages: `en`, `ar`. Modes: `basic` (summary), `advanced` (technical
 
 Database mode inspects repository schema/migrations and data-access code, not a live database. Its dedicated output contains a summary, key findings, up to 6 tables with relevant columns/relationships, caveats and source evidence. It does not execute SQL, generate scripts or request unrelated API/workflow sections. Missing physical names and constraints must remain unverified. The extra `database[].columns` and `database[].relationships` lists default to empty for older Advanced results. The Codex effort stays `medium`.
 
+## Request cancellation
+
+The frontend assigns a fresh UUID in `X-Request-ID` to each API request. `POST /api/requests/{id}/cancel` acknowledges cancellation with HTTP 204 and also handles cancellation arriving before the original request. Requests without this header remain compatible.
+
+The browser aborts immediately. Backend analyses cooperate with cancellation; an active Codex turn uses [`turn/interrupt`](https://learn.chatgpt.com/docs/app-server#interrupt-a-turn) with its own thread/turn IDs. Identical analyses remain shared while another caller still needs the result. Cancelled or failed refreshes retain the previous successful cache. Setup RPCs finish their bounded acknowledgement before interrupting a newly started turn; cancellation cannot recover usage already consumed. If interruption cannot be confirmed, the private backend-owned Codex process is reset as a safety fallback.
+
+Cancellation IDs are random request capabilities, not user authentication. Keep this local-only service protected as described below.
+
 ## Security and scope
 
 This service accesses local repositories through read-only analysis and validates source-viewer paths and ranges. Scope classification and answer grounding are model-based and are not deterministic security boundaries. Source-viewer redaction does not filter all repository content read by Codex.
