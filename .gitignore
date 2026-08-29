@@ -2,6 +2,8 @@
 /target/
 /out/
 /build/
+/release/
+/.build-tools/
 *.class
 *.log
 *.db

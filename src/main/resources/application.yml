@@ -1,4 +1,5 @@
 server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:8090}
 
 spring:
@@ -6,6 +7,8 @@ spring:
     name: projects-knowledge
 
 projects-knowledge:
+  desktop:
+    enabled: false
   storage:
     persistent-cache-enabled: true
   codex:

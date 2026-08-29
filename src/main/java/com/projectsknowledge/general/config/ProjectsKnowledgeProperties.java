@@ -14,7 +14,15 @@ public class ProjectsKnowledgeProperties {
 
     private Scan scan = new Scan();
     private Codex codex = new Codex();
+    private Desktop desktop = new Desktop();
     private Storage storage = new Storage();
+
+    @Getter
+    @Setter
+    public static class Desktop {
+
+        private boolean enabled;
+    }
 
     @Getter
     @Setter

@@ -37,6 +37,26 @@ java -jar target/backend-0.0.1-SNAPSHOT.jar
 
 On macOS/Linux, replace `.\mvnw.cmd` with `sh ./mvnw`. Packaging does not require the frontend.
 
+## Build the Windows desktop distribution
+
+The frontend and backend remain separate repositories. The release script expects the frontend checkout in the sibling `../frontend` directory, builds Angular, embeds its production files in the Spring Boot JAR, and then uses JDK `jpackage` to bundle Java with the application.
+
+```powershell
+$env:JAVA_HOME = 'C:\path\to\jdk-21'
+.\packaging\build-windows.ps1
+```
+
+The build machine also needs a Node version supported by the checked-in Angular CLI. When a different Node executable should be used without changing the system installation, pass `-NodePath C:\path\to\node.exe`. Frontend dependencies are installed in an isolated backend `target` directory, so a running frontend development server is not touched.
+
+Outputs are written to the ignored `release` directory:
+
+- `ProjectsKnowledge-Portable-1.0.0.zip`: extract the whole folder and run `ProjectsKnowledge.exe`; Java and Node are not required on the destination PC.
+- `ProjectsKnowledge-Setup-1.0.0.exe`: per-user Windows installer, created when WiX 3 `candle.exe` and `light.exe` are available or supplied with `-WixPath`.
+
+After a successful build, the portable ZIP is also copied to the current user's Desktop and replaces the previous file with the same version. Pass `-SkipDesktopCopy` when that extra copy is not wanted.
+
+The desktop launcher opens `http://127.0.0.1:8090/?desktop=true`. Use **Close app** in the header to stop the local server; the action requires confirmation and is accepted only from the loopback interface. A **Projects Knowledge** tray icon with Open and Exit actions is also added when Windows exposes system-tray support. Codex is deliberately not bundled: each user must install Codex, sign in with their own account, and keep the repositories they want to query on their computer. The default server address is loopback-only.
+
 ## Configuration
 
 Operational defaults are in `src/main/resources/application.yml`. Override them through environment variables or an ignored local Spring configuration file; never commit credentials or a personal project catalog.
