@@ -17,7 +17,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 
 /** Verifies package scanning and constructor wiring without starting any Codex analysis. */
-@SpringBootTest(properties = "projects-knowledge.codex.enabled=false")
+@SpringBootTest(
+    properties = {
+        "projects-knowledge.codex.enabled=false",
+        "projects-knowledge.storage.persistent-cache-enabled=false"
+    }
+)
 class ProjectsKnowledgeApplicationTest {
 
     @Autowired

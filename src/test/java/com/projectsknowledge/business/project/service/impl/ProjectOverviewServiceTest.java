@@ -10,6 +10,8 @@ import com.projectsknowledge.business.project.schema.response.DtoProject;
 import com.projectsknowledge.business.project.service.ProjectOverviewService;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.RequestCancelledException;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
@@ -112,6 +114,39 @@ class ProjectOverviewServiceTest {
         assertThat(expired).isNotSameAs(first);
         assertThat(expired.overviewUpdatedAt()).isEqualTo(start.plusSeconds(18_000));
         verify(client, times(2)).overview(anyList());
+    }
+
+    @Test
+    void restoresOverviewAfterServiceRestartWithoutAnotherCodexTurn() {
+        Path database = root.resolve("local-cache/knowledge.db");
+        var persistent = new PersistentKnowledgeCache(new ObjectMapper().findAndRegisterModules(), database, true);
+        persistent.initialize();
+        var firstService = new ProjectOverviewServiceImpl(
+            client,
+            new RepositoryScanner(properties),
+            properties,
+            clock,
+            persistent
+        );
+        var first = firstService.get(project);
+
+        var restartedCache = new PersistentKnowledgeCache(
+            new ObjectMapper().findAndRegisterModules(),
+            database,
+            true
+        );
+        restartedCache.initialize();
+        var restartedService = new ProjectOverviewServiceImpl(
+            client,
+            new RepositoryScanner(properties),
+            properties,
+            clock,
+            restartedCache
+        );
+        var restored = restartedService.get(project);
+
+        assertThat(restored).isEqualTo(first).isNotSameAs(first);
+        verify(client, times(1)).overview(anyList());
     }
 
     @Test

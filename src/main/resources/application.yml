@@ -6,6 +6,8 @@ spring:
     name: projects-knowledge
 
 projects-knowledge:
+  storage:
+    persistent-cache-enabled: true
   codex:
     enabled: true
     command: ${CODEX_COMMAND:codex.exe}

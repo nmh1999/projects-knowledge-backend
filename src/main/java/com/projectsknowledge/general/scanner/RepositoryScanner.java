@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -87,14 +89,22 @@ public class RepositoryScanner {
     private final Map<Path, FileSnapshot> fileCache = new ConcurrentHashMap<>();
 
     public List<Path> files(Repository repository) {
+        return snapshot(repository).files();
+    }
+
+    /** A cheap, short-lived signature prevents disk-cached answers surviving repository changes. */
+    public String fingerprint(Repository repository) {
+        return snapshot(repository).fingerprint();
+    }
+
+    private FileSnapshot snapshot(Repository repository) {
         int ttl = properties.getScan().getFileCacheSeconds();
-        if (ttl <= 0) return discoverFiles(repository);
+        if (ttl <= 0) return discoverSnapshot(repository);
         Instant validAfter = Instant.now().minusSeconds(ttl);
         fileCache.entrySet().removeIf(entry -> !entry.getValue().loadedAt().isAfter(validAfter));
         Path root = repository.getPath().toAbsolutePath().normalize();
         return fileCache
-            .computeIfAbsent(root, ignored -> new FileSnapshot(Instant.now(), discoverFiles(repository)))
-            .files();
+            .computeIfAbsent(root, ignored -> discoverSnapshot(repository));
     }
 
     public void invalidateFiles(Repository repository) {
@@ -227,6 +237,32 @@ public class RepositoryScanner {
         }
     }
 
+    private FileSnapshot discoverSnapshot(Repository repository) {
+        List<Path> files = discoverFiles(repository);
+        Path root = repository.getPath().toAbsolutePath().normalize();
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (Path file : files.stream().sorted().toList()) {
+                Path relative = root.relativize(file);
+                update(digest, relative.toString().replace('\\', '/'));
+                try {
+                    update(digest, Long.toString(Files.size(file)));
+                    update(digest, Long.toString(Files.getLastModifiedTime(file).toMillis()));
+                } catch (IOException ignored) {
+                    update(digest, "unavailable");
+                }
+            }
+            return new FileSnapshot(Instant.now(), files, java.util.HexFormat.of().formatHex(digest.digest()));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable.", impossible);
+        }
+    }
+
+    private void update(MessageDigest digest, String value) {
+        digest.update(value.getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) 0);
+    }
+
     private boolean isIgnored(Path file, Path root) {
         Path relative = root.relativize(file);
         for (Path part : relative)
@@ -310,5 +346,5 @@ public class RepositoryScanner {
         }
     }
 
-    private record FileSnapshot(Instant loadedAt, List<Path> files) {}
+    private record FileSnapshot(Instant loadedAt, List<Path> files, String fingerprint) {}
 }

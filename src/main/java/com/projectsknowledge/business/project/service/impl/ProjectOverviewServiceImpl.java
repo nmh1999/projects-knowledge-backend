@@ -9,6 +9,7 @@ import com.projectsknowledge.business.project.schema.response.DtoRepository;
 import com.projectsknowledge.business.project.service.ProjectOverviewService;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.SharedAnalysis;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
@@ -25,21 +26,47 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 /** One evidence-based overview per project snapshot, shared for five hours by all page visits. */
 @Service
-@RequiredArgsConstructor
 public class ProjectOverviewServiceImpl implements ProjectOverviewService {
+
+    private static final String OVERVIEW_NAMESPACE = "overview-v1";
 
     private final CodexAppServerClient client;
     private final RepositoryScanner scanner;
     private final ProjectsKnowledgeProperties properties;
     private final Clock clock;
+    private final PersistentKnowledgeCache persistentCache;
     private final Map<CacheKey, CacheEntry> cache = new LinkedHashMap<>(16, .75f, true);
     private final SharedAnalysis<CacheKey, DtoProject> inFlight = new SharedAnalysis<>();
+
+    @Autowired
+    public ProjectOverviewServiceImpl(
+        CodexAppServerClient client,
+        RepositoryScanner scanner,
+        ProjectsKnowledgeProperties properties,
+        Clock clock,
+        PersistentKnowledgeCache persistentCache
+    ) {
+        this.client = client;
+        this.scanner = scanner;
+        this.properties = properties;
+        this.clock = clock;
+        this.persistentCache = persistentCache;
+    }
+
+    ProjectOverviewServiceImpl(
+        CodexAppServerClient client,
+        RepositoryScanner scanner,
+        ProjectsKnowledgeProperties properties,
+        Clock clock
+    ) {
+        this(client, scanner, properties, clock, PersistentKnowledgeCache.disabled());
+    }
 
     @Override
     public DtoProject get(Project project) {
@@ -53,7 +80,22 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
 
     private DtoProject load(Project project, boolean forceRefresh) {
         RequestCancellation.check();
-        CacheKey key = new CacheKey(
+        CacheKey key = cacheKey(project);
+        DtoProject cached = forceRefresh ? null : cached(key);
+        if (cached != null) return cached;
+
+        // Concurrent opens of the same project share a model call; unrelated projects do not block each other.
+        return inFlight.run(key, () -> {
+            DtoProject snapshot = forceRefresh ? null : cached(key);
+            DtoProject result = snapshot != null ? snapshot : build(project);
+            // Building refreshes scanner metadata, so persist against the completed repository fingerprint.
+            if (snapshot == null) RequestCancellation.publish(() -> remember(cacheKey(project), result));
+            return result;
+        });
+    }
+
+    private CacheKey cacheKey(Project project) {
+        return new CacheKey(
             project.getId(),
             project.getName(),
             project
@@ -64,22 +106,13 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
                         repo.getId(),
                         repo.getName(),
                         repo.getPath().toAbsolutePath().normalize(),
-                        repo.getType()
+                        repo.getType(),
+                        scanner.fingerprint(repo)
                     )
                 )
                 .sorted(Comparator.comparing(repo -> repo.path().toString()))
                 .toList()
         );
-        DtoProject cached = forceRefresh ? null : cached(key);
-        if (cached != null) return cached;
-
-        // Concurrent opens of the same project share a model call; unrelated projects do not block each other.
-        return inFlight.run(key, () -> {
-            DtoProject snapshot = forceRefresh ? null : cached(key);
-            DtoProject result = snapshot != null ? snapshot : build(project);
-            if (snapshot == null) RequestCancellation.publish(() -> remember(key, result));
-            return result;
-        });
     }
 
     private DtoProject build(Project project) {
@@ -179,7 +212,12 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
             ) return null;
             prune();
             CacheEntry entry = cache.get(key);
-            return entry == null ? null : entry.project();
+            if (entry != null) return entry.project();
+            DtoProject persisted = persistentCache
+                .find(OVERVIEW_NAMESPACE, key.toString(), DtoProject.class, clock.instant())
+                .orElse(null);
+            if (persisted != null) cache.put(key, new CacheEntry(persisted.overviewUpdatedAt(), persisted));
+            return persisted;
         }
     }
 
@@ -191,6 +229,14 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
             // Timestamp and TTL both start at successful completion, never on page reads or failed attempts.
             cache.put(key, new CacheEntry(project.overviewUpdatedAt(), project));
             while (cache.size() > maxEntries) cache.remove(cache.keySet().iterator().next());
+            persistentCache.put(
+                OVERVIEW_NAMESPACE,
+                key.toString(),
+                project,
+                project.overviewUpdatedAt(),
+                project.overviewUpdatedAt().plusSeconds(properties.getCodex().getOverviewCacheSeconds()),
+                maxEntries
+            );
         }
     }
 
@@ -199,7 +245,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
         cache.entrySet().removeIf(entry -> !entry.getValue().loadedAt().isAfter(cutoff));
     }
 
-    private record RepositoryKey(String id, String name, Path path, RepositoryType type) {}
+    private record RepositoryKey(String id, String name, Path path, RepositoryType type, String fingerprint) {}
 
     private record CacheKey(String projectId, String name, List<RepositoryKey> repositories) {}
 

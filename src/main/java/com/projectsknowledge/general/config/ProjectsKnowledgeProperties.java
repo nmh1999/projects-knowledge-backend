@@ -14,6 +14,23 @@ public class ProjectsKnowledgeProperties {
 
     private Scan scan = new Scan();
     private Codex codex = new Codex();
+    private Storage storage = new Storage();
+
+    @Getter
+    @Setter
+    public static class Storage {
+
+        private boolean persistentCacheEnabled = true;
+        private Path persistentCachePath = defaultCachePath();
+
+        private static Path defaultCachePath() {
+            String localAppData = System.getenv("LOCALAPPDATA");
+            Path base = localAppData == null || localAppData.isBlank()
+                ? Path.of(System.getProperty("user.home"), ".projects-knowledge")
+                : Path.of(localAppData, "ProjectsKnowledge");
+            return base.resolve("cache").resolve("knowledge.db");
+        }
+    }
 
     @Getter
     @Setter

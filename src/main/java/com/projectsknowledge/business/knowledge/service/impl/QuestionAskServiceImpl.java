@@ -12,9 +12,11 @@ import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.SharedAnalysis;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
+import com.projectsknowledge.general.scanner.RepositoryScanner;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -25,22 +27,59 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** Orchestrates Codex questions, validates source evidence, and caches repeated answers locally. */
 @Service
-@RequiredArgsConstructor
 public class QuestionAskServiceImpl implements QuestionAskService {
+
+    private static final String ANSWER_NAMESPACE = "answer-v1";
+    private static final String INTEGRATION_NAMESPACE = "integration-v1";
 
     private final ProjectRetrievalService projectService;
     private final CodexAppServerClient codexClient;
     private final ProjectsKnowledgeProperties properties;
     private final Clock clock;
+    private final RepositoryScanner scanner;
+    private final PersistentKnowledgeCache persistentCache;
     // The cache avoids a second Codex turn for the same normalized question and is bounded by configuration.
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> answerCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> integrationCache = new ConcurrentHashMap<>();
     private final SharedAnalysis<CacheKey, DtoKnowledgeAnswer> inFlight = new SharedAnalysis<>();
+
+    @Autowired
+    public QuestionAskServiceImpl(
+        ProjectRetrievalService projectService,
+        CodexAppServerClient codexClient,
+        ProjectsKnowledgeProperties properties,
+        Clock clock,
+        RepositoryScanner scanner,
+        PersistentKnowledgeCache persistentCache
+    ) {
+        this.projectService = projectService;
+        this.codexClient = codexClient;
+        this.properties = properties;
+        this.clock = clock;
+        this.scanner = scanner;
+        this.persistentCache = persistentCache;
+    }
+
+    QuestionAskServiceImpl(
+        ProjectRetrievalService projectService,
+        CodexAppServerClient codexClient,
+        ProjectsKnowledgeProperties properties,
+        Clock clock
+    ) {
+        this(
+            projectService,
+            codexClient,
+            properties,
+            clock,
+            new RepositoryScanner(properties),
+            PersistentKnowledgeCache.disabled()
+        );
+    }
 
     @Override
     public DtoKnowledgeAnswer ask(ReqQuestion request) {
@@ -56,7 +95,7 @@ public class QuestionAskServiceImpl implements QuestionAskService {
         Project project = projectService.requireProject(request.projectId());
         String language = "ar".equalsIgnoreCase(request.language()) ? "ar" : "en";
         CacheKey key = cacheKey(project, language, normalizeQuestion(request.question()), request.mode(), false);
-        return resolve(answerCache, key, properties.getCodex().getAnswerCacheSeconds(), refresh, () ->
+        return resolve(answerCache, ANSWER_NAMESPACE, key, properties.getCodex().getAnswerCacheSeconds(), refresh, () ->
             query(project, request.question(), language, request.mode())
         );
     }
@@ -76,7 +115,13 @@ public class QuestionAskServiceImpl implements QuestionAskService {
         String language = "ar".equalsIgnoreCase(request.language()) ? "ar" : "en";
         String name = request.name().strip();
         CacheKey key = cacheKey(project, language, name.toLowerCase(Locale.ROOT), SearchMode.ADVANCED, true);
-        return resolve(integrationCache, key, properties.getCodex().getIntegrationCacheSeconds(), refresh, () ->
+        return resolve(
+            integrationCache,
+            INTEGRATION_NAMESPACE,
+            key,
+            properties.getCodex().getIntegrationCacheSeconds(),
+            refresh,
+            () ->
             query(project, integrationQuestion(name, language), language, SearchMode.ADVANCED)
         );
     }
@@ -126,6 +171,7 @@ public class QuestionAskServiceImpl implements QuestionAskService {
     /** Share concurrent work; refresh replaces the snapshot only after a successful analysis. */
     private DtoKnowledgeAnswer resolve(
         ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache,
+        String namespace,
         CacheKey key,
         int ttlSeconds,
         boolean refresh,
@@ -134,12 +180,12 @@ public class QuestionAskServiceImpl implements QuestionAskService {
         RequestCancellation.check();
         boolean cacheEnabled = ttlSeconds > 0 && properties.getCodex().getAnswerCacheMaxEntries() > 0;
         if (!refresh && cacheEnabled) {
-            DtoKnowledgeAnswer cached = cachedAnswer(cache, key);
+            DtoKnowledgeAnswer cached = cachedAnswer(cache, namespace, key);
             if (cached != null) return cached;
         }
         return inFlight.run(key, () -> {
             // Another request may have completed between the first cache lookup and acquiring this slot.
-            DtoKnowledgeAnswer answer = !refresh && cacheEnabled ? cachedAnswer(cache, key) : null;
+            DtoKnowledgeAnswer answer = !refresh && cacheEnabled ? cachedAnswer(cache, namespace, key) : null;
             if (answer == null) {
                 DtoKnowledgeAnswer result = analyze.get();
                 RequestCancellation.check();
@@ -150,22 +196,48 @@ public class QuestionAskServiceImpl implements QuestionAskService {
                     .expiresAt(cacheEnabled ? completedAt.plusSeconds(ttlSeconds) : null)
                     .build();
                 DtoKnowledgeAnswer snapshot = answer;
-                if (cacheEnabled) RequestCancellation.publish(() -> cacheAnswer(cache, key, snapshot));
+                if (cacheEnabled) RequestCancellation.publish(() -> cacheAnswer(cache, namespace, key, snapshot));
             }
             return answer;
         });
     }
 
-    private DtoKnowledgeAnswer cachedAnswer(ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache, CacheKey key) {
+    private DtoKnowledgeAnswer cachedAnswer(
+        ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache,
+        String namespace,
+        CacheKey key
+    ) {
         DtoKnowledgeAnswer answer = cache.get(key);
         if (answer != null && !clock.instant().isBefore(answer.expiresAt())) {
             cache.remove(key, answer);
             return null;
         }
-        return answer;
+        if (answer != null) return answer;
+        DtoKnowledgeAnswer persisted = persistentCache
+            .find(namespace, key.toString(), DtoKnowledgeAnswer.class, clock.instant())
+            .orElse(null);
+        if (persisted != null) rememberInMemory(cache, key, persisted);
+        return persisted;
     }
 
     private void cacheAnswer(
+        ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache,
+        String namespace,
+        CacheKey key,
+        DtoKnowledgeAnswer answer
+    ) {
+        rememberInMemory(cache, key, answer);
+        persistentCache.put(
+            namespace,
+            key.toString(),
+            answer,
+            answer.updatedAt(),
+            answer.expiresAt(),
+            properties.getCodex().getAnswerCacheMaxEntries()
+        );
+    }
+
+    private void rememberInMemory(
         ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> cache,
         CacheKey key,
         DtoKnowledgeAnswer answer
@@ -190,7 +262,9 @@ public class QuestionAskServiceImpl implements QuestionAskService {
         List<String> roots = project
             .getRepositories()
             .stream()
-            .map(repository -> repository.getPath().toAbsolutePath().normalize().toString())
+            .map(repository ->
+                repository.getPath().toAbsolutePath().normalize() + "#" + scanner.fingerprint(repository)
+            )
             .sorted()
             .toList();
         return new CacheKey(project.getId(), project.getName(), roots, language, question, mode, integration);

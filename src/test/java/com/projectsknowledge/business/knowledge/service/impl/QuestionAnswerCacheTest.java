@@ -12,9 +12,12 @@ import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.RequestCancelledException;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
+import com.projectsknowledge.general.scanner.RepositoryScanner;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -25,10 +28,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class QuestionAnswerCacheTest {
+
+    @TempDir
+    Path cacheRoot;
 
     private final CodexAppServerClient client = mock(CodexAppServerClient.class);
     private final ProjectRetrievalService projects = mock(ProjectRetrievalService.class);
@@ -130,6 +137,77 @@ class QuestionAnswerCacheTest {
         project.setId("other");
         service.ask(new ReqQuestion("other", question.question(), "en", SearchMode.BASIC));
         verify(client, times(3)).ask(anyList(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void restoresAnAnswerAfterServiceRestartWithoutAnotherCodexTurn() {
+        var persistent = new PersistentKnowledgeCache(
+            new ObjectMapper().findAndRegisterModules(),
+            cacheRoot.resolve("knowledge.db"),
+            true
+        );
+        persistent.initialize();
+        var scanner = new RepositoryScanner(properties);
+        var firstService = new QuestionAskServiceImpl(projects, client, properties, clock, scanner, persistent);
+        var first = firstService.ask(question);
+
+        var restartedCache = new PersistentKnowledgeCache(
+            new ObjectMapper().findAndRegisterModules(),
+            cacheRoot.resolve("knowledge.db"),
+            true
+        );
+        restartedCache.initialize();
+        var restartedService = new QuestionAskServiceImpl(
+            projects,
+            client,
+            properties,
+            clock,
+            new RepositoryScanner(properties),
+            restartedCache
+        );
+        var restored = restartedService.ask(question);
+
+        assertThat(restored).isEqualTo(first).isNotSameAs(first);
+        verify(client, times(1)).ask(anyList(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void restoresIntegrationDetailsAfterServiceRestartWithoutAnotherCodexTurn() {
+        Path database = cacheRoot.resolve("integration-knowledge.db");
+        var persistent = new PersistentKnowledgeCache(
+            new ObjectMapper().findAndRegisterModules(),
+            database,
+            true
+        );
+        persistent.initialize();
+        var firstService = new QuestionAskServiceImpl(
+            projects,
+            client,
+            properties,
+            clock,
+            new RepositoryScanner(properties),
+            persistent
+        );
+        var request = new ReqIntegrationDetails("sample", "Orbit", "en");
+        var first = firstService.explainIntegration(request);
+
+        var restartedCache = new PersistentKnowledgeCache(
+            new ObjectMapper().findAndRegisterModules(),
+            database,
+            true
+        );
+        restartedCache.initialize();
+        var restartedService = new QuestionAskServiceImpl(
+            projects,
+            client,
+            properties,
+            clock,
+            new RepositoryScanner(properties),
+            restartedCache
+        );
+
+        assertThat(restartedService.explainIntegration(request)).isEqualTo(first).isNotSameAs(first);
+        verify(client, times(1)).ask(anyList(), anyString(), anyString(), any());
     }
 
     @Test

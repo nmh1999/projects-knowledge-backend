@@ -4,6 +4,9 @@
 /build/
 *.class
 *.log
+*.db
+*.db-shm
+*.db-wal
 hs_err_pid*
 replay_pid*
 
