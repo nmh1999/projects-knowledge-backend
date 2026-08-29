@@ -15,10 +15,10 @@ projects-knowledge:
     enabled: true
     command: ${CODEX_COMMAND:codex.exe}
     timeout-seconds: 300
-    project-cache-seconds: 3600
-    answer-cache-seconds: 18000
-    integration-cache-seconds: 18000
-    overview-cache-seconds: 18000
+    project-cache-seconds: 86400
+    answer-cache-seconds: 86400
+    integration-cache-seconds: 86400
+    overview-cache-seconds: 86400
     overview-cache-max-entries: 50
     answer-cache-max-entries: 100
   scan:

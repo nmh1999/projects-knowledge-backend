@@ -67,5 +67,16 @@ class PersistentKnowledgeCacheTest {
         assertThat(cache.find("overview-v1", "overview", CacheValue.class, now.plusSeconds(3))).isPresent();
     }
 
+    @Test
+    void clearsEveryPersistentNamespace() {
+        cache.put("answer-v1", "answer", new CacheValue("answer", now), now, now.plusSeconds(300), 10);
+        cache.put("overview-v1", "overview", new CacheValue("overview", now), now, now.plusSeconds(300), 10);
+
+        cache.clearCache();
+
+        assertThat(cache.find("answer-v1", "answer", CacheValue.class, now.plusSeconds(1))).isEmpty();
+        assertThat(cache.find("overview-v1", "overview", CacheValue.class, now.plusSeconds(1))).isEmpty();
+    }
+
     record CacheValue(String text, Instant createdAt) {}
 }

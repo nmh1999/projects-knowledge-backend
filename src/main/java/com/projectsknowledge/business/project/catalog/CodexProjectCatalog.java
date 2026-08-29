@@ -3,6 +3,7 @@ package com.projectsknowledge.business.project.catalog;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.enums.RepositoryType;
+import com.projectsknowledge.general.cache.CacheClearable;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
@@ -30,7 +31,7 @@ import org.springframework.stereotype.Service;
 /** Caches the dynamically discovered project list until expiry or an explicit refresh. */
 @Service
 @RequiredArgsConstructor
-public class CodexProjectCatalog {
+public class CodexProjectCatalog implements CacheClearable {
 
     private static final Set<String> IGNORED_DIRECTORIES = Set.of(
         ".git",
@@ -67,6 +68,11 @@ public class CodexProjectCatalog {
 
     public List<Project> refresh() {
         return projects(true);
+    }
+
+    @Override
+    public void clearCache() {
+        cache = new Cache(Instant.EPOCH, List.of());
     }
 
     private List<Project> projects(boolean refresh) {

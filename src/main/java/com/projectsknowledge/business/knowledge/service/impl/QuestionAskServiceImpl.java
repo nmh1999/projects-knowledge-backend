@@ -10,9 +10,10 @@ import com.projectsknowledge.business.knowledge.service.QuestionAskService;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
+import com.projectsknowledge.general.cache.CacheClearable;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.SharedAnalysis;
-import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
@@ -32,7 +33,7 @@ import org.springframework.stereotype.Service;
 
 /** Orchestrates Codex questions, validates source evidence, and caches repeated answers locally. */
 @Service
-public class QuestionAskServiceImpl implements QuestionAskService {
+public class QuestionAskServiceImpl implements QuestionAskService, CacheClearable {
 
     private static final String ANSWER_NAMESPACE = "answer-v1";
     private static final String INTEGRATION_NAMESPACE = "integration-v1";
@@ -108,6 +109,12 @@ public class QuestionAskServiceImpl implements QuestionAskService {
     @Override
     public DtoKnowledgeAnswer refreshIntegration(ReqIntegrationDetails request) {
         return integrationDetails(request, true);
+    }
+
+    @Override
+    public void clearCache() {
+        answerCache.clear();
+        integrationCache.clear();
     }
 
     private DtoKnowledgeAnswer integrationDetails(ReqIntegrationDetails request, boolean refresh) {

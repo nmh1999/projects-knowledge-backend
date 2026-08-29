@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 /** Local SQLite storage for successful, bounded Codex results. Failures degrade to memory-only caching. */
 @Component
 @Slf4j
-public class PersistentKnowledgeCache {
+public class PersistentKnowledgeCache implements CacheClearable {
 
     private final ObjectMapper mapper;
     private final Path databasePath;
@@ -164,6 +164,16 @@ public class PersistentKnowledgeCache {
             statement.executeUpdate();
         } catch (SQLException exception) {
             log.warn("Could not prune persistent cache: {}", exception.getMessage());
+        }
+    }
+
+    @Override
+    public synchronized void clearCache() {
+        if (!available) return;
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("DELETE FROM knowledge_cache");
+        } catch (SQLException exception) {
+            log.warn("Could not clear persistent cache: {}", exception.getMessage());
         }
     }
 

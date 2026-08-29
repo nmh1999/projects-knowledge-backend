@@ -55,7 +55,7 @@ Outputs are written to the ignored `release` directory:
 
 After a successful build, the portable ZIP is also copied to the current user's Desktop and replaces the previous file with the same version. Pass `-SkipDesktopCopy` when that extra copy is not wanted.
 
-The desktop launcher opens `http://127.0.0.1:8090/?desktop=true`. Use **Close app** in the header to stop the local server; the action requires confirmation and is accepted only from the loopback interface. A **Projects Knowledge** tray icon with Open and Exit actions is also added when Windows exposes system-tray support. Codex is deliberately not bundled: each user must install Codex, sign in with their own account, and keep the repositories they want to query on their computer. The default server address is loopback-only.
+The desktop launcher opens `http://127.0.0.1:8090/?desktop=true`. Use **Close app** in the header to stop the local server, or **Clear cache** to delete every in-memory and persistent cache; both actions require confirmation and are accepted only from the loopback interface. A **Projects Knowledge** tray icon with Open and Exit actions is also added when Windows exposes system-tray support. Codex is deliberately not bundled: each user must install Codex, sign in with their own account, and keep the repositories they want to query on their computer. The default server address is loopback-only.
 
 ## Configuration
 
@@ -65,10 +65,10 @@ Operational defaults are in `src/main/resources/application.yml`. Override them 
 | --- | --- |
 | `SERVER_PORT` | `8090` |
 | `CODEX_COMMAND` | `codex.exe` (Windows); use `codex` on other systems |
-| Project catalog cache | 3,600 seconds (1 hour) |
-| Question answer cache | 18,000 seconds (5 hours) |
-| Integration detail cache | 18,000 seconds (5 hours) |
-| Project overview cache | 18,000 seconds (5 hours) |
+| Project catalog cache | 86,400 seconds (24 hours) |
+| Question answer cache | 86,400 seconds (24 hours) |
+| Integration detail cache | 86,400 seconds (24 hours) |
+| Project overview cache | 86,400 seconds (24 hours) |
 | Persistent cache | enabled; `%LOCALAPPDATA%/ProjectsKnowledge/cache/knowledge.db` on Windows |
 
 Projects and repository roots come dynamically from Codex workspaces. This backend does not ship a fixed list of project names, repository paths, package namespaces, or integration vendors. Successful answers, integration details and project overviews are also stored in a bounded local SQLite cache, so restarting the service does not require the same Codex analysis again. Set `PROJECTS_KNOWLEDGE_STORAGE_PERSISTENT_CACHE_ENABLED=false` to use memory only, or override `PROJECTS_KNOWLEDGE_STORAGE_PERSISTENT_CACHE_PATH`. The cache file stays outside the repository by default and must never be committed.
@@ -115,7 +115,7 @@ Use a project ID returned by `/api/projects`, or `all` for the combined scope. A
 
 Supported languages: `en`, `ar`. Modes: `basic` (summary), `advanced` (technical details and sources), `workflow` (roles, steps, example and diagram), `database` (tables, relevant columns, keys, relationships and data access). The frontend defaults to Basic; omitting the API mode retains Advanced behavior. Answers are cached separately by project/repositories, question, language and mode.
 
-`POST /api/questions/refresh` accepts the same question body and bypasses a cached answer. Integration details support the equivalent `POST /api/integrations/details/refresh`. Responses include server-generated `updatedAt` and `expiresAt` timestamps: five hours begin after analysis finishes, and cache hits do not extend them. Identical in-flight analyses are shared. Failed or cancelled refreshes preserve both the memory and disk snapshots. The SQLite cache is bounded by namespace and invalidates naturally when the selected repository paths or their short-lived file fingerprints change. Refresh reruns analysis and consumes model usage.
+`POST /api/questions/refresh` accepts the same question body and bypasses a cached answer. Integration details support the equivalent `POST /api/integrations/details/refresh`. Responses include server-generated `updatedAt` and `expiresAt` timestamps: 24 hours begin after analysis finishes, and cache hits do not extend them. Identical in-flight analyses are shared. Failed or cancelled refreshes preserve both the memory and disk snapshots. The SQLite cache is bounded by namespace and invalidates naturally when the selected repository paths or their short-lived file fingerprints change. Refresh reruns analysis and consumes model usage.
 
 Database mode inspects repository schema/migrations and data-access code, not a live database. Its dedicated output contains a summary, key findings, up to 6 tables with relevant columns/relationships, caveats and source evidence. It does not execute SQL, generate scripts or request unrelated API/workflow sections. Missing physical names and constraints must remain unverified. The extra `database[].columns` and `database[].relationships` lists default to empty for older Advanced results. The Codex effort stays `medium`.
 

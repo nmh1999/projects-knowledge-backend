@@ -1,6 +1,7 @@
 package com.projectsknowledge.general.scanner;
 
 import com.projectsknowledge.business.project.entity.Repository;
+import com.projectsknowledge.general.cache.CacheClearable;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import java.io.IOException;
@@ -28,7 +29,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @RequiredArgsConstructor
-public class RepositoryScanner {
+public class RepositoryScanner implements CacheClearable {
 
     private static final Set<String> IGNORED_DIRECTORIES = Set.of(
         ".git",
@@ -109,6 +110,11 @@ public class RepositoryScanner {
 
     public void invalidateFiles(Repository repository) {
         fileCache.remove(repository.getPath().toAbsolutePath().normalize());
+    }
+
+    @Override
+    public void clearCache() {
+        fileCache.clear();
     }
 
     public List<String> readLines(Repository repository, Path file) {

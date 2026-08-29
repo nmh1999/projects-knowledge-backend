@@ -99,20 +99,20 @@ class ProjectOverviewServiceTest {
     }
 
     @Test
-    void cachesWholePageForExactlyFiveHoursFromCompletion() {
-        assertThat(properties.getCodex().getOverviewCacheSeconds()).isEqualTo(18_000);
+    void cachesWholePageForExactlyTwentyFourHoursFromCompletion() {
+        assertThat(properties.getCodex().getOverviewCacheSeconds()).isEqualTo(86_400);
         var first = service.get(project);
         assertThat(first.overviewUpdatedAt()).isEqualTo(start);
         assertThat(first.overview().integrations()).containsExactly("Orbit");
         assertThat(first.overview().backend()).containsExactly("Spring Boot");
         assertThat(first.repositories().getFirst().languages()).contains("Java");
-        when(clock.instant()).thenReturn(start.plusSeconds(17_999));
+        when(clock.instant()).thenReturn(start.plusSeconds(86_399));
         assertThat(service.get(project)).isSameAs(first);
         verify(client, times(1)).overview(anyList());
-        when(clock.instant()).thenReturn(start.plusSeconds(18_000));
+        when(clock.instant()).thenReturn(start.plusSeconds(86_400));
         var expired = service.get(project);
         assertThat(expired).isNotSameAs(first);
-        assertThat(expired.overviewUpdatedAt()).isEqualTo(start.plusSeconds(18_000));
+        assertThat(expired.overviewUpdatedAt()).isEqualTo(start.plusSeconds(86_400));
         verify(client, times(2)).overview(anyList());
     }
 
@@ -169,11 +169,11 @@ class ProjectOverviewServiceTest {
         assertThat(refreshed).isNotSameAs(first);
         assertThat(refreshed.overviewUpdatedAt()).isEqualTo(start.plusSeconds(60));
         assertThat(refreshed.repositories().getFirst().languages()).contains("Python");
-        when(clock.instant()).thenReturn(start.plusSeconds(18_000));
+        when(clock.instant()).thenReturn(start.plusSeconds(86_400));
         assertThat(service.get(project)).isSameAs(refreshed);
         verify(client, times(2)).overview(anyList());
-        when(clock.instant()).thenReturn(start.plusSeconds(18_060));
-        assertThat(service.get(project).overviewUpdatedAt()).isEqualTo(start.plusSeconds(18_060));
+        when(clock.instant()).thenReturn(start.plusSeconds(86_460));
+        assertThat(service.get(project).overviewUpdatedAt()).isEqualTo(start.plusSeconds(86_460));
         verify(client, times(3)).overview(anyList());
     }
 

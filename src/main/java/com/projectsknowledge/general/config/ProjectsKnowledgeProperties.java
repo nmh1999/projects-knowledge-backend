@@ -57,10 +57,10 @@ public class ProjectsKnowledgeProperties {
             ? "codex.exe"
             : "codex";
         private int timeoutSeconds = 300;
-        private int projectCacheSeconds = 3_600;
-        private int answerCacheSeconds = 18_000;
-        private int integrationCacheSeconds = 18_000;
-        private int overviewCacheSeconds = 18_000;
+        private int projectCacheSeconds = 86_400;
+        private int answerCacheSeconds = 86_400;
+        private int integrationCacheSeconds = 86_400;
+        private int overviewCacheSeconds = 86_400;
         private int overviewCacheMaxEntries = 50;
         private int answerCacheMaxEntries = 100;
         private List<Path> excludedPaths = new ArrayList<>();

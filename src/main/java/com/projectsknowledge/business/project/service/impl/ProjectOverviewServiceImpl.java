@@ -7,9 +7,10 @@ import com.projectsknowledge.business.project.schema.response.DtoProject;
 import com.projectsknowledge.business.project.schema.response.DtoProjectOverview;
 import com.projectsknowledge.business.project.schema.response.DtoRepository;
 import com.projectsknowledge.business.project.service.ProjectOverviewService;
+import com.projectsknowledge.general.cache.CacheClearable;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.SharedAnalysis;
-import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
@@ -30,9 +31,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-/** One evidence-based overview per project snapshot, shared for five hours by all page visits. */
+/** One evidence-based overview per project snapshot, shared until its configured expiry. */
 @Service
-public class ProjectOverviewServiceImpl implements ProjectOverviewService {
+public class ProjectOverviewServiceImpl implements ProjectOverviewService, CacheClearable {
 
     private static final String OVERVIEW_NAMESPACE = "overview-v1";
 
@@ -76,6 +77,13 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService {
     @Override
     public DtoProject refresh(Project project) {
         return load(project, true);
+    }
+
+    @Override
+    public void clearCache() {
+        synchronized (cache) {
+            cache.clear();
+        }
     }
 
     private DtoProject load(Project project, boolean forceRefresh) {

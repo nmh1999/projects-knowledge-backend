@@ -98,7 +98,7 @@ class QuestionAskServiceTest {
         service.explainIntegration(new ReqIntegrationDetails("project", "Example Billing", "en"));
         service.explainIntegration(new ReqIntegrationDetails("project", " example billing ", "en"));
 
-        assertThat(properties.getCodex().getIntegrationCacheSeconds()).isEqualTo(18_000);
+        assertThat(properties.getCodex().getIntegrationCacheSeconds()).isEqualTo(86_400);
         assertThat(codex.calls).isEqualTo(1);
         assertThat(codex.modes).containsExactly(SearchMode.ADVANCED);
     }

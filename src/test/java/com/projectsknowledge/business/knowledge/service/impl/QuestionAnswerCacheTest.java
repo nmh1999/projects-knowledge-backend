@@ -65,8 +65,8 @@ class QuestionAnswerCacheTest {
 
     @ParameterizedTest
     @EnumSource(SearchMode.class)
-    void cachesEveryModeForExactlyFiveHoursFromCompletionWithoutSlidingExpiry(SearchMode mode) {
-        assertThat(properties.getCodex().getAnswerCacheSeconds()).isEqualTo(18_000);
+    void cachesEveryModeForExactlyTwentyFourHoursFromCompletionWithoutSlidingExpiry(SearchMode mode) {
+        assertThat(properties.getCodex().getAnswerCacheSeconds()).isEqualTo(86_400);
         var request = new ReqQuestion("sample", question.question(), "en", mode);
         when(client.ask(anyList(), anyString(), anyString(), any())).thenAnswer(call -> {
             when(clock.instant()).thenReturn(start.plusSeconds(30));
@@ -74,7 +74,7 @@ class QuestionAnswerCacheTest {
         });
         var first = service.ask(request);
         assertThat(first.updatedAt()).isEqualTo(start.plusSeconds(30));
-        assertThat(first.expiresAt()).isEqualTo(start.plusSeconds(18_030));
+        assertThat(first.expiresAt()).isEqualTo(start.plusSeconds(86_430));
         when(clock.instant()).thenReturn(first.expiresAt().minusNanos(1));
         assertThat(service.ask(request)).isSameAs(first);
         verify(client, times(1)).ask(anyList(), anyString(), anyString(), any());
@@ -117,7 +117,7 @@ class QuestionAnswerCacheTest {
         when(clock.instant()).thenReturn(start.plusSeconds(60));
         var second = service.refresh(question);
         assertThat(second.updatedAt()).isEqualTo(start.plusSeconds(60));
-        assertThat(second.expiresAt()).isEqualTo(start.plusSeconds(18_060));
+        assertThat(second.expiresAt()).isEqualTo(start.plusSeconds(86_460));
         assertThat(service.ask(question)).isSameAs(second).isNotSameAs(first);
         verify(client, times(2)).ask(anyList(), anyString(), anyString(), any());
         when(client.ask(anyList(), anyString(), anyString(), any())).thenThrow(new IllegalStateException("Offline"));
@@ -211,10 +211,10 @@ class QuestionAnswerCacheTest {
     }
 
     @Test
-    void isolatesIntegrationCacheAndAllowsManualRefreshWithTheSameFiveHourTtl() {
+    void isolatesIntegrationCacheAndAllowsManualRefreshWithTheSameTwentyFourHourTtl() {
         var integration = new ReqIntegrationDetails("sample", "Orbit", "en");
         var first = service.explainIntegration(integration);
-        assertThat(first.expiresAt()).isEqualTo(start.plusSeconds(18_000));
+        assertThat(first.expiresAt()).isEqualTo(start.plusSeconds(86_400));
         assertThat(service.explainIntegration(integration)).isSameAs(first);
         service.ask(new ReqQuestion("sample", "Orbit", "en", SearchMode.ADVANCED));
         var refreshed = service.refreshIntegration(integration);
