@@ -6,32 +6,29 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.projectsknowledge.general.cache.KnowledgeCacheManager;
-import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class DesktopControllerTest {
 
     @Test
-    void shutdownIsUnavailableOutsideThePackagedDesktopApplication() throws Exception {
-        var properties = new ProjectsKnowledgeProperties();
+    void shutdownIsAvailableInEveryLocalRunMode() throws Exception {
         var desktopApplication = mock(DesktopApplicationService.class);
         var cacheManager = mock(KnowledgeCacheManager.class);
-        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(properties, desktopApplication, cacheManager))
+        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(desktopApplication, cacheManager))
             .build();
 
         mvc.perform(post("/api/desktop/shutdown").header(DesktopController.DESKTOP_HEADER, "true"))
-            .andExpect(status().isNotFound());
-        verifyNoInteractions(desktopApplication);
+            .andExpect(status().isAccepted());
+        verify(desktopApplication).requestShutdown();
         verifyNoInteractions(cacheManager);
     }
 
     @Test
     void shutdownRequiresTheDesktopHeaderAndALoopbackRequest() throws Exception {
-        var properties = enabledProperties();
         var desktopApplication = mock(DesktopApplicationService.class);
         var cacheManager = mock(KnowledgeCacheManager.class);
-        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(properties, desktopApplication, cacheManager))
+        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(desktopApplication, cacheManager))
             .build();
 
         mvc.perform(post("/api/desktop/shutdown")).andExpect(status().isForbidden());
@@ -50,10 +47,9 @@ class DesktopControllerTest {
 
     @Test
     void shutdownAcceptsThePackagedLocalInterface() throws Exception {
-        var properties = enabledProperties();
         var desktopApplication = mock(DesktopApplicationService.class);
         var cacheManager = mock(KnowledgeCacheManager.class);
-        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(properties, desktopApplication, cacheManager))
+        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(desktopApplication, cacheManager))
             .build();
 
         mvc.perform(
@@ -71,10 +67,9 @@ class DesktopControllerTest {
 
     @Test
     void cacheClearRequiresThePackagedLocalInterface() throws Exception {
-        var properties = enabledProperties();
         var desktopApplication = mock(DesktopApplicationService.class);
         var cacheManager = mock(KnowledgeCacheManager.class);
-        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(properties, desktopApplication, cacheManager))
+        var mvc = MockMvcBuilders.standaloneSetup(new DesktopController(desktopApplication, cacheManager))
             .build();
 
         mvc.perform(delete("/api/desktop/cache")).andExpect(status().isForbidden());
@@ -89,11 +84,5 @@ class DesktopControllerTest {
             .andExpect(status().isNoContent());
         verify(cacheManager).clearAll();
         verifyNoInteractions(desktopApplication);
-    }
-
-    private ProjectsKnowledgeProperties enabledProperties() {
-        var properties = new ProjectsKnowledgeProperties();
-        properties.getDesktop().setEnabled(true);
-        return properties;
     }
 }
