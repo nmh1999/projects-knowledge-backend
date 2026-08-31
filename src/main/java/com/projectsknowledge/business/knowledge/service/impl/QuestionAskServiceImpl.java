@@ -17,7 +17,6 @@ import com.projectsknowledge.general.cancellation.SharedAnalysis;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
-import com.projectsknowledge.general.scanner.RepositoryScanner;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -35,14 +34,13 @@ import org.springframework.stereotype.Service;
 @Service
 public class QuestionAskServiceImpl implements QuestionAskService, CacheClearable {
 
-    private static final String ANSWER_NAMESPACE = "answer-v1";
-    private static final String INTEGRATION_NAMESPACE = "integration-v1";
+    private static final String ANSWER_NAMESPACE = "answer-v2";
+    private static final String INTEGRATION_NAMESPACE = "integration-v2";
 
     private final ProjectRetrievalService projectService;
     private final CodexAppServerClient codexClient;
     private final ProjectsKnowledgeProperties properties;
     private final Clock clock;
-    private final RepositoryScanner scanner;
     private final PersistentKnowledgeCache persistentCache;
     // The cache avoids a second Codex turn for the same normalized question and is bounded by configuration.
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> answerCache = new ConcurrentHashMap<>();
@@ -55,14 +53,12 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
         CodexAppServerClient codexClient,
         ProjectsKnowledgeProperties properties,
         Clock clock,
-        RepositoryScanner scanner,
         PersistentKnowledgeCache persistentCache
     ) {
         this.projectService = projectService;
         this.codexClient = codexClient;
         this.properties = properties;
         this.clock = clock;
-        this.scanner = scanner;
         this.persistentCache = persistentCache;
     }
 
@@ -77,7 +73,6 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
             codexClient,
             properties,
             clock,
-            new RepositoryScanner(properties),
             PersistentKnowledgeCache.disabled()
         );
     }
@@ -265,13 +260,11 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
     }
 
     private CacheKey cacheKey(Project project, String language, String question, SearchMode mode, boolean integration) {
-        // Dynamic scope changes (including All Projects) must not reuse answers from old repository roots.
+        // Keep cache reads independent of repository size. Manual refresh and TTL control source freshness.
         List<String> roots = project
             .getRepositories()
             .stream()
-            .map(repository ->
-                repository.getPath().toAbsolutePath().normalize() + "#" + scanner.fingerprint(repository)
-            )
+            .map(repository -> repository.getPath().toAbsolutePath().normalize().toString())
             .sorted()
             .toList();
         return new CacheKey(project.getId(), project.getName(), roots, language, question, mode, integration);

@@ -32,7 +32,7 @@ class QuestionAskServiceTest {
     Path root;
 
     @Test
-    void reusesCachedAnswerForEquivalentQuestion() {
+    void reusesCachedAnswerForEquivalentQuestionWithoutRescanningChangedFiles() throws Exception {
         ProjectsKnowledgeProperties properties = new ProjectsKnowledgeProperties();
         Project project = project();
         DtoCodexKnowledgeResult result = new DtoCodexKnowledgeResult(
@@ -59,6 +59,7 @@ class QuestionAskServiceTest {
         QuestionAskService service = new QuestionAskServiceImpl(projects, codex, properties, Clock.systemUTC());
 
         service.ask(new ReqQuestion("project", "Which framework?", "en"));
+        java.nio.file.Files.writeString(root.resolve("changed-after-cache.ts"), "export const changed = true;");
         service.ask(new ReqQuestion("project", "  WHICH   FRAMEWORK? ", "en"));
 
         assertThat(codex.calls).isEqualTo(1);

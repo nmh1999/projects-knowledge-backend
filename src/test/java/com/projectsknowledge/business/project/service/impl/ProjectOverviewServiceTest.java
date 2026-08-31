@@ -165,6 +165,8 @@ class ProjectOverviewServiceTest {
         var first = service.get(project);
         when(clock.instant()).thenReturn(start.plusSeconds(60));
         Files.writeString(root.resolve("new-module.py"), "# newly added source");
+        assertThat(service.get(project)).isSameAs(first);
+        verify(client, times(1)).overview(anyList());
         var refreshed = service.refresh(project);
         assertThat(refreshed).isNotSameAs(first);
         assertThat(refreshed.overviewUpdatedAt()).isEqualTo(start.plusSeconds(60));

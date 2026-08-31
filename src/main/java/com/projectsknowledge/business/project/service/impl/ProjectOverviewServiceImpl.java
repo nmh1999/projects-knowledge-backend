@@ -35,7 +35,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class ProjectOverviewServiceImpl implements ProjectOverviewService, CacheClearable {
 
-    private static final String OVERVIEW_NAMESPACE = "overview-v1";
+    private static final String OVERVIEW_NAMESPACE = "overview-v2";
 
     private final CodexAppServerClient client;
     private final RepositoryScanner scanner;
@@ -96,7 +96,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
         return inFlight.run(key, () -> {
             DtoProject snapshot = forceRefresh ? null : cached(key);
             DtoProject result = snapshot != null ? snapshot : build(project);
-            // Building refreshes scanner metadata, so persist against the completed repository fingerprint.
+            // A successful refresh replaces the stable project cache entry.
             if (snapshot == null) RequestCancellation.publish(() -> remember(cacheKey(project), result));
             return result;
         });
@@ -114,8 +114,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
                         repo.getId(),
                         repo.getName(),
                         repo.getPath().toAbsolutePath().normalize(),
-                        repo.getType(),
-                        scanner.fingerprint(repo)
+                        repo.getType()
                     )
                 )
                 .sorted(Comparator.comparing(repo -> repo.path().toString()))
@@ -253,7 +252,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
         cache.entrySet().removeIf(entry -> !entry.getValue().loadedAt().isAfter(cutoff));
     }
 
-    private record RepositoryKey(String id, String name, Path path, RepositoryType type, String fingerprint) {}
+    private record RepositoryKey(String id, String name, Path path, RepositoryType type) {}
 
     private record CacheKey(String projectId, String name, List<RepositoryKey> repositories) {}
 

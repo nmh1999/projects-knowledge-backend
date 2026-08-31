@@ -16,7 +16,6 @@ import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
-import com.projectsknowledge.general.scanner.RepositoryScanner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -147,8 +146,7 @@ class QuestionAnswerCacheTest {
             true
         );
         persistent.initialize();
-        var scanner = new RepositoryScanner(properties);
-        var firstService = new QuestionAskServiceImpl(projects, client, properties, clock, scanner, persistent);
+        var firstService = new QuestionAskServiceImpl(projects, client, properties, clock, persistent);
         var first = firstService.ask(question);
 
         var restartedCache = new PersistentKnowledgeCache(
@@ -162,7 +160,6 @@ class QuestionAnswerCacheTest {
             client,
             properties,
             clock,
-            new RepositoryScanner(properties),
             restartedCache
         );
         var restored = restartedService.ask(question);
@@ -185,7 +182,6 @@ class QuestionAnswerCacheTest {
             client,
             properties,
             clock,
-            new RepositoryScanner(properties),
             persistent
         );
         var request = new ReqIntegrationDetails("sample", "Orbit", "en");
@@ -202,7 +198,6 @@ class QuestionAnswerCacheTest {
             client,
             properties,
             clock,
-            new RepositoryScanner(properties),
             restartedCache
         );
 
