@@ -80,6 +80,10 @@ final class CodexAppServerConnection implements AutoCloseable {
         return !closed.get() && process.isAlive();
     }
 
+    int activeTurns() {
+        return turns.size();
+    }
+
     JsonNode request(String method, Object params, Duration timeout) {
         long id = nextId.incrementAndGet();
         var response = new CompletableFuture<JsonNode>();

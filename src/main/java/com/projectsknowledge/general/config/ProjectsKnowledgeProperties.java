@@ -30,13 +30,17 @@ public class ProjectsKnowledgeProperties {
 
         private boolean persistentCacheEnabled = true;
         private Path persistentCachePath = defaultCachePath();
+        private Path codexSettingsPath = defaultApplicationDataPath().resolve("codex-settings.json");
 
         private static Path defaultCachePath() {
+            return defaultApplicationDataPath().resolve("cache").resolve("knowledge.db");
+        }
+
+        private static Path defaultApplicationDataPath() {
             String localAppData = System.getenv("LOCALAPPDATA");
-            Path base = localAppData == null || localAppData.isBlank()
+            return localAppData == null || localAppData.isBlank()
                 ? Path.of(System.getProperty("user.home"), ".projects-knowledge")
                 : Path.of(localAppData, "ProjectsKnowledge");
-            return base.resolve("cache").resolve("knowledge.db");
         }
     }
 
@@ -56,6 +60,8 @@ public class ProjectsKnowledgeProperties {
         private String command = System.getProperty("os.name", "").toLowerCase().contains("win")
             ? "codex.exe"
             : "codex";
+        private String model = "";
+        private String reasoningEffort = "medium";
         private int timeoutSeconds = 300;
         private int projectCacheSeconds = 86_400;
         private int answerCacheSeconds = 86_400;

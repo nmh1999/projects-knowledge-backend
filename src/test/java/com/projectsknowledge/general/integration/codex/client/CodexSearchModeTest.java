@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
+import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ class CodexSearchModeTest {
     private final CodexAppServerClient client = new CodexAppServerClient(
         mapper,
         new ProjectsKnowledgeProperties(),
+        org.mockito.Mockito.mock(CodexRuntimeSettings.class),
         org.mockito.Mockito.mock(CodexAppServerTransport.class)
     );
 

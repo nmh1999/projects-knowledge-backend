@@ -65,6 +65,9 @@ Operational defaults are in `src/main/resources/application.yml`. Override them 
 | --- | --- |
 | `SERVER_PORT` | `8090` |
 | `CODEX_COMMAND` | `codex.exe` (Windows); use `codex` on other systems |
+| `CODEX_MODEL` | empty; follows the default model reported by the installed Codex runtime |
+| `CODEX_REASONING_EFFORT` | `medium` |
+| Saved Codex selection | `%LOCALAPPDATA%/ProjectsKnowledge/codex-settings.json` |
 | Project catalog cache | 86,400 seconds (24 hours) |
 | Question answer cache | 86,400 seconds (24 hours) |
 | Integration detail cache | 86,400 seconds (24 hours) |
@@ -75,7 +78,7 @@ Projects and repository roots come dynamically from Codex workspaces. This backe
 
 ## Codex connection lifecycle
 
-The backend lazily starts one private `codex app-server --listen stdio://` process and initializes it once. Catalog requests and independent question/overview conversations reuse that connection. There is no model warm-up request and no conversation history is reused: each analysis still creates a fresh, ephemeral, read-only thread with `medium` effort.
+The backend lazily starts one private `codex app-server --listen stdio://` process and initializes it once. Catalog requests and independent question/overview conversations reuse that connection. There is no model warm-up request and no conversation history is reused: each analysis still creates a fresh, ephemeral, read-only thread. The model follows Codex's reported default unless `CODEX_MODEL` is set; reasoning effort defaults to `medium` and can be overridden with `CODEX_REASONING_EFFORT`. A selection saved from the web UI takes precedence and is stored separately from disposable caches.
 
 - Request IDs route RPC replies; thread and turn IDs isolate concurrent answers. A catalog request does not wait for another question to finish.
 - Completed threads are unsubscribed using the [official OpenAI app-server protocol](https://learn.chatgpt.com/docs/app-server#unsubscribe-from-a-loaded-thread). Codex controls when unsubscribed threads are unloaded.
@@ -95,6 +98,9 @@ Remove-Item Env:CODEX_TRANSPORT_SMOKE_TEST
 ## API
 
 - `GET /api/projects`: list available projects without model analysis.
+- `GET /api/codex/status`: check connection, authentication readiness, selected model, reasoning effort and active turn count without starting a model turn or exposing account identifiers.
+- `GET /api/codex/settings`: load the available runtime models and their supported reasoning efforts without starting a model turn.
+- `PUT /api/codex/settings`: validate and persist the model and reasoning effort used by new analyses.
 - `POST /api/projects/refresh`: bypass the catalog cache and reload available projects without model analysis; overview caches are unchanged.
 - `GET /api/projects/{id}`: get the analyzed, cached project overview.
 - `POST /api/projects/{id}/overview/refresh`: run a fresh overview analysis.

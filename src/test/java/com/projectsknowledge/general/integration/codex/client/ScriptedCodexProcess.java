@@ -65,6 +65,34 @@ final class ScriptedCodexProcess extends Process {
                     if (handler.test(this, message)) continue;
                     switch (message.path("method").asText()) {
                         case "initialize" -> reply(message, Map.of("userAgent", "test"));
+                        case "account/read" -> reply(
+                            message,
+                            Map.of("account", Map.of("type", "chatgpt"), "requiresOpenaiAuth", true)
+                        );
+                        case "model/list" -> reply(
+                            message,
+                            Map.of(
+                                "data",
+                    List.of(
+                        Map.of(
+                            "model",
+                            "test-default",
+                            "displayName",
+                            "Test Default",
+                            "isDefault",
+                            true,
+                            "defaultReasoningEffort",
+                            "medium",
+                            "supportedReasoningEfforts",
+                            List.of(
+                                Map.of("reasoningEffort", "low", "description", "Faster"),
+                                Map.of("reasoningEffort", "medium", "description", "Balanced"),
+                                Map.of("reasoningEffort", "high", "description", "Deeper")
+                            )
+                        )
+                    )
+                )
+            );
                         case "thread/list" -> reply(message, Map.of("data", List.of()));
                         case "thread/start" -> reply(
                             message,

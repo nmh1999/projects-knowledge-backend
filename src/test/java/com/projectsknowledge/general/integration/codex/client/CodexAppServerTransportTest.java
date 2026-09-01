@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
+import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import java.nio.file.Path;
@@ -30,11 +31,23 @@ class CodexAppServerTransportTest {
     private final ScriptedCodexProcess first = new ScriptedCodexProcess();
     private final ScriptedCodexProcess second = new ScriptedCodexProcess();
     private final CodexAppServerTransport transport = new CodexAppServerTransport(mapper, properties, processes);
-    private final CodexAppServerClient client = new CodexAppServerClient(mapper, properties, transport);
+    private final CodexRuntimeSettings runtimeSettings = mock(CodexRuntimeSettings.class);
+    private final CodexAppServerClient client = new CodexAppServerClient(
+        mapper,
+        properties,
+        runtimeSettings,
+        transport
+    );
 
     @BeforeEach
     void setup() throws Exception {
         when(processes.start()).thenReturn(first, second);
+        when(runtimeSettings.current()).thenAnswer(invocation ->
+            new CodexRuntimeSettings.Selection(
+                properties.getCodex().getModel(),
+                properties.getCodex().getReasoningEffort()
+            )
+        );
         properties.getCodex().setTimeoutSeconds(3);
     }
 
@@ -80,6 +93,70 @@ class CodexAppServerTransportTest {
                 .filter(request -> request.has("id"))
                 .map(request -> request.path("id").asLong())
         ).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void reportsSafeRuntimeStatusWithoutStartingAModelTurn() throws Exception {
+        var status = client.status();
+
+        assertThat(status.enabled()).isTrue();
+        assertThat(status.connected()).isTrue();
+        assertThat(status.ready()).isTrue();
+        assertThat(status.authenticationType()).isEqualTo("chatgpt");
+        assertThat(status.model()).isEqualTo("test-default");
+        assertThat(status.reasoningEffort()).isEqualTo("medium");
+        assertThat(status.activeRequests()).isZero();
+        assertThat(first.requests("account/read")).hasSize(1);
+        assertThat(first.requests("model/list")).hasSize(1);
+        assertThat(first.requests("thread/start")).isEmpty();
+        assertThat(first.requests("turn/start")).isEmpty();
+    }
+
+    @Test
+    void sendsConfiguredModelAndReasoningEffort() throws Exception {
+        properties.getCodex().setModel("custom-model");
+        properties.getCodex().setReasoningEffort("high");
+        first.handler = (peer, request) -> {
+            if (!"turn/start".equals(request.path("method").asText())) return false;
+            peer.complete(request, "done", false);
+            return true;
+        };
+
+        assertThat(ask("sample")).isEqualTo("done");
+        assertThat(first.requests("thread/start").getFirst().at("/params/model").asText()).isEqualTo("custom-model");
+        assertThat(first.requests("turn/start").getFirst().at("/params/effort").asText()).isEqualTo("high");
+    }
+
+    @Test
+    void validatesAndAppliesSavedRuntimeSettingsToNewRequests() throws Exception {
+        when(runtimeSettings.update("", "high")).thenReturn(new CodexRuntimeSettings.Selection("", "high"));
+
+        var updated = client.updateSettings(
+            new com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings("", "HIGH")
+        );
+
+        assertThat(updated.selectedModel()).isEmpty();
+        assertThat(updated.status().model()).isEqualTo("test-default");
+        assertThat(updated.status().reasoningEffort()).isEqualTo("high");
+        assertThat(updated.models()).singleElement().satisfies(model -> {
+            assertThat(model.displayName()).isEqualTo("Test Default");
+            assertThat(model.reasoningEfforts()).extracting("value").containsExactly("low", "medium", "high");
+        });
+        verify(runtimeSettings).update("", "high");
+        assertThat(first.requests("thread/start")).isEmpty();
+        assertThat(first.requests("turn/start")).isEmpty();
+    }
+
+    @Test
+    void rejectsAnUnsupportedReasoningEffortWithoutSavingIt() {
+        assertThatThrownBy(() ->
+            client.updateSettings(
+                new com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings("", "ultra")
+            )
+        )
+            .isInstanceOf(KnowledgeException.class)
+            .hasMessageContaining("not supported");
+        verify(runtimeSettings, never()).update(anyString(), anyString());
     }
 
     @Test
@@ -251,6 +328,7 @@ class CodexAppServerTransportTest {
     void disabledIntegrationDoesNotStartAProcess() throws Exception {
         properties.getCodex().setEnabled(false);
         assertThatThrownBy(client::listThreads).isInstanceOf(KnowledgeException.class);
+        assertThat(client.status().enabled()).isFalse();
         verifyNoInteractions(processes);
     }
 

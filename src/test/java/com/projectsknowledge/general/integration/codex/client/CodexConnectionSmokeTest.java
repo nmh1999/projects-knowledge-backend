@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -27,7 +28,13 @@ class CodexConnectionSmokeTest {
         var properties = new ProjectsKnowledgeProperties();
         var factory = spy(new CodexProcessFactory(properties));
         try (var transport = new CodexAppServerTransport(mapper, properties, factory)) {
-            var client = new CodexAppServerClient(mapper, properties, transport);
+            var settings = new CodexRuntimeSettings(
+                mapper,
+                workspace.resolve("codex-settings.json"),
+                properties.getCodex().getModel(),
+                properties.getCodex().getReasoningEffort()
+            );
+            var client = new CodexAppServerClient(mapper, properties, settings, transport);
             long started = System.nanoTime();
             client.listThreads();
             long coldFinished = System.nanoTime();

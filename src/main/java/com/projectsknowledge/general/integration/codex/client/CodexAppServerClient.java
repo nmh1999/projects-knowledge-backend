@@ -5,11 +5,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
+import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
+import com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
+import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexModel;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexProjectOverview;
+import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexReasoningEffort;
+import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexSettings;
+import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexStatus;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoDatabaseKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoWorkflowKnowledgeResult;
 import java.io.IOException;
@@ -53,7 +59,55 @@ public class CodexAppServerClient {
         "The mode-specific answer and investigation instructions below apply only when inScope=true. ";
     private final ObjectMapper mapper;
     private final ProjectsKnowledgeProperties properties;
+    private final CodexRuntimeSettings runtimeSettings;
     private final CodexAppServerTransport transport;
+
+    /** Lightweight capability check; never exposes account identifiers or starts a model turn. */
+    public DtoCodexStatus status() {
+        return settings().status();
+    }
+
+    /** Available models and efforts come directly from the connected Codex runtime. */
+    public DtoCodexSettings settings() {
+        var config = properties.getCodex();
+        var selected = runtimeSettings.current();
+        if (!config.isEnabled()) {
+            return DtoCodexSettings.unavailable(
+                DtoCodexStatus.disabled(selected.model(), selected.reasoningEffort()),
+                selected.model()
+            );
+        }
+        try {
+            CodexAppServerConnection connection = transport.connection();
+            return readSettings(connection, selected);
+        } catch (KnowledgeException exception) {
+            return DtoCodexSettings.unavailable(
+                DtoCodexStatus.unavailable(selected.model(), selected.reasoningEffort()),
+                selected.model()
+            );
+        }
+    }
+
+    public DtoCodexSettings updateSettings(ReqCodexSettings request) {
+        if (!properties.getCodex().isEnabled()) throw new KnowledgeException(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "Codex is disabled."
+        );
+        CodexAppServerConnection connection = transport.connection();
+        JsonNode account = readAccount(connection);
+        JsonNode modelResponse = readModels(connection);
+        List<DtoCodexModel> models = parseModels(modelResponse);
+        DtoCodexModel selectedModel = findModel(models, request.model());
+        if (selectedModel == null) throw new KnowledgeException(HttpStatus.BAD_REQUEST, "The selected model is unavailable.");
+        String effort = request.reasoningEffort().strip().toLowerCase(java.util.Locale.ROOT);
+        boolean supported = selectedModel.reasoningEfforts().stream().anyMatch(option -> option.value().equals(effort));
+        if (!supported) throw new KnowledgeException(
+            HttpStatus.BAD_REQUEST,
+            "The selected reasoning effort is not supported by this model."
+        );
+        var saved = runtimeSettings.update(request.model(), effort);
+        return buildSettings(connection, account, models, saved);
+    }
 
     public List<CodexThread> listThreads() {
         RequestCancellation.check();
@@ -120,6 +174,7 @@ public class CodexAppServerClient {
         long turnStarted = 0;
         boolean completed = false;
         try {
+            var selectedRuntime = runtimeSettings.current();
             List<String> roots = workspaceRoots
                 .stream()
                 .map(path -> path.toAbsolutePath().normalize().toString())
@@ -131,6 +186,9 @@ public class CodexAppServerClient {
             startParams.put("approvalPolicy", "never");
             startParams.put("ephemeral", true);
             startParams.put("developerInstructions", developerInstructions);
+            if (!selectedRuntime.model().isBlank()) {
+                startParams.put("model", selectedRuntime.model());
+            }
             RequestCancellation.check();
             JsonNode threadResult = connection.request("thread/start", startParams, setupTimeout());
             threadId = threadResult.path("thread").path("id").asText();
@@ -142,7 +200,7 @@ public class CodexAppServerClient {
             Map<String, Object> turnParams = new LinkedHashMap<>();
             turnParams.put("threadId", threadId);
             turnParams.put("input", List.of(Map.of("type", "text", "text", prompt)));
-            turnParams.put("effort", "medium");
+            turnParams.put("effort", selectedRuntime.reasoningEffort());
             turnParams.put("summary", "concise");
             turnParams.put("outputSchema", schema);
             turnStarted = System.nanoTime();
@@ -169,6 +227,85 @@ public class CodexAppServerClient {
 
     private Duration setupTimeout() {
         return Duration.ofSeconds(Math.max(1, Math.min(30, properties.getCodex().getTimeoutSeconds())));
+    }
+
+    private DtoCodexSettings readSettings(
+        CodexAppServerConnection connection,
+        CodexRuntimeSettings.Selection selected
+    ) {
+        return buildSettings(connection, readAccount(connection), parseModels(readModels(connection)), selected);
+    }
+
+    private JsonNode readAccount(CodexAppServerConnection connection) {
+        return connection.request("account/read", Map.of("refreshToken", false), setupTimeout());
+    }
+
+    private JsonNode readModels(CodexAppServerConnection connection) {
+        return connection.request(
+            "model/list",
+            Map.of("limit", 100, "includeHidden", false),
+            setupTimeout()
+        );
+    }
+
+    private DtoCodexSettings buildSettings(
+        CodexAppServerConnection connection,
+        JsonNode account,
+        List<DtoCodexModel> models,
+        CodexRuntimeSettings.Selection selected
+    ) {
+        JsonNode accountDetails = account.path("account");
+        boolean authenticated = !accountDetails.isMissingNode() && !accountDetails.isNull();
+        boolean ready = authenticated || !account.path("requiresOpenaiAuth").asBoolean(true);
+        DtoCodexModel effective = findModel(models, selected.model());
+        String effectiveModel = effective == null ? selected.model() : effective.id();
+        DtoCodexStatus status = new DtoCodexStatus(
+            true,
+            true,
+            ready,
+            authenticated ? accountDetails.path("type").asText("") : "",
+            effectiveModel,
+            selected.reasoningEffort(),
+            connection.activeTurns()
+        );
+        return new DtoCodexSettings(status, selected.model(), models);
+    }
+
+    private List<DtoCodexModel> parseModels(JsonNode response) {
+        List<DtoCodexModel> models = new ArrayList<>();
+        for (JsonNode item : response.path("data")) {
+            String id = item.path("model").asText(item.path("id").asText(""));
+            if (id.isBlank()) continue;
+            String defaultEffort = item.path("defaultReasoningEffort").asText("");
+            List<DtoCodexReasoningEffort> efforts = new ArrayList<>();
+            for (JsonNode option : item.path("supportedReasoningEfforts")) {
+                String value = option.path("reasoningEffort").asText("");
+                if (!value.isBlank()) efforts.add(
+                    new DtoCodexReasoningEffort(value, option.path("description").asText(""))
+                );
+            }
+            if (efforts.isEmpty() && !defaultEffort.isBlank()) {
+                efforts.add(new DtoCodexReasoningEffort(defaultEffort, ""));
+            }
+            models.add(
+                new DtoCodexModel(
+                    id,
+                    item.path("displayName").asText(id),
+                    item.path("description").asText(""),
+                    item.path("isDefault").asBoolean(false),
+                    defaultEffort,
+                    List.copyOf(efforts)
+                )
+            );
+        }
+        return List.copyOf(models);
+    }
+
+    private DtoCodexModel findModel(List<DtoCodexModel> models, String selectedModel) {
+        if (selectedModel == null || selectedModel.isBlank()) {
+            return models.stream().filter(DtoCodexModel::defaultModel).findFirst().orElse(null);
+        }
+        return models.stream().filter(model -> model.id().equals(selectedModel.strip())).findFirst().orElse(null);
     }
 
     String overviewInstructions() {

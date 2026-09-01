@@ -68,13 +68,7 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
         ProjectsKnowledgeProperties properties,
         Clock clock
     ) {
-        this(
-            projectService,
-            codexClient,
-            properties,
-            clock,
-            PersistentKnowledgeCache.disabled()
-        );
+        this(projectService, codexClient, properties, clock, PersistentKnowledgeCache.disabled());
     }
 
     @Override

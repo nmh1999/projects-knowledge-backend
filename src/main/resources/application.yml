@@ -14,6 +14,9 @@ projects-knowledge:
   codex:
     enabled: true
     command: ${CODEX_COMMAND:codex.exe}
+    # Leave CODEX_MODEL empty to follow the default model exposed by the installed Codex runtime.
+    model: ${CODEX_MODEL:}
+    reasoning-effort: ${CODEX_REASONING_EFFORT:medium}
     timeout-seconds: 300
     project-cache-seconds: 86400
     answer-cache-seconds: 86400
