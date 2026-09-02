@@ -18,6 +18,7 @@ projects-knowledge:
     model: ${CODEX_MODEL:}
     reasoning-effort: ${CODEX_REASONING_EFFORT:medium}
     timeout-seconds: 300
+    model-cache-seconds: 18000
     project-cache-seconds: 86400
     answer-cache-seconds: 86400
     integration-cache-seconds: 86400

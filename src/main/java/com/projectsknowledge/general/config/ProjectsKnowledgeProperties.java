@@ -63,6 +63,7 @@ public class ProjectsKnowledgeProperties {
         private String model = "";
         private String reasoningEffort = "medium";
         private int timeoutSeconds = 300;
+        private int modelCacheSeconds = 18_000;
         private int projectCacheSeconds = 86_400;
         private int answerCacheSeconds = 86_400;
         private int integrationCacheSeconds = 86_400;

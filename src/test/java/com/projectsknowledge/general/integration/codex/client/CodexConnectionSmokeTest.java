@@ -34,7 +34,14 @@ class CodexConnectionSmokeTest {
                 properties.getCodex().getModel(),
                 properties.getCodex().getReasoningEffort()
             );
-            var client = new CodexAppServerClient(mapper, properties, settings, transport);
+            var client = new CodexAppServerClient(
+                mapper,
+                properties,
+                settings,
+                transport,
+                java.time.Clock.systemUTC(),
+                com.projectsknowledge.general.cache.PersistentKnowledgeCache.disabled()
+            );
             long started = System.nanoTime();
             client.listThreads();
             long coldFinished = System.nanoTime();

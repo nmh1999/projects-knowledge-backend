@@ -68,13 +68,14 @@ Operational defaults are in `src/main/resources/application.yml`. Override them 
 | `CODEX_MODEL` | empty; follows the default model reported by the installed Codex runtime |
 | `CODEX_REASONING_EFFORT` | `medium` |
 | Saved Codex selection | `%LOCALAPPDATA%/ProjectsKnowledge/codex-settings.json` |
+| Codex model catalog cache | 18,000 seconds (5 hours) |
 | Project catalog cache | 86,400 seconds (24 hours) |
 | Question answer cache | 86,400 seconds (24 hours) |
 | Integration detail cache | 86,400 seconds (24 hours) |
 | Project overview cache | 86,400 seconds (24 hours) |
 | Persistent cache | enabled; `%LOCALAPPDATA%/ProjectsKnowledge/cache/knowledge.db` on Windows |
 
-Projects and repository roots come dynamically from Codex workspaces. This backend does not ship a fixed list of project names, repository paths, package namespaces, or integration vendors. Successful answers, integration details and project overviews are also stored in a bounded local SQLite cache, so restarting the service does not require the same Codex analysis again. Set `PROJECTS_KNOWLEDGE_STORAGE_PERSISTENT_CACHE_ENABLED=false` to use memory only, or override `PROJECTS_KNOWLEDGE_STORAGE_PERSISTENT_CACHE_PATH`. The cache file stays outside the repository by default and must never be committed.
+Projects and repository roots come dynamically from Codex workspaces. This backend does not ship a fixed list of project names, repository paths, package namespaces, or integration vendors. The Codex model catalog, successful answers, integration details and project overviews are stored in a bounded local SQLite cache, so restarting the service does not require the same Codex requests again. Set `PROJECTS_KNOWLEDGE_STORAGE_PERSISTENT_CACHE_ENABLED=false` to use memory only, or override `PROJECTS_KNOWLEDGE_STORAGE_PERSISTENT_CACHE_PATH`. The cache file stays outside the repository by default and must never be committed.
 
 ## Codex connection lifecycle
 

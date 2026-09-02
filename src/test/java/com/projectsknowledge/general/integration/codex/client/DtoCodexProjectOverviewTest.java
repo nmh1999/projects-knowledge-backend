@@ -16,7 +16,9 @@ class DtoCodexProjectOverviewTest {
         mapper,
         new ProjectsKnowledgeProperties(),
         org.mockito.Mockito.mock(CodexRuntimeSettings.class),
-        org.mockito.Mockito.mock(CodexAppServerTransport.class)
+        org.mockito.Mockito.mock(CodexAppServerTransport.class),
+        java.time.Clock.systemUTC(),
+        com.projectsknowledge.general.cache.PersistentKnowledgeCache.disabled()
     );
     private final String valid = """
         {"frontend":[],"backend":["Spring Boot"],"databases":[],"domains":["Shipping"],

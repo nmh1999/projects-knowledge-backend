@@ -343,7 +343,14 @@ class QuestionAskServiceTest {
         private final List<SearchMode> modes = new ArrayList<>();
 
         private StubCodexClient(DtoCodexKnowledgeResult result, ProjectsKnowledgeProperties properties) {
-            super(new ObjectMapper(), properties, null, null);
+            super(
+                new ObjectMapper(),
+                properties,
+                null,
+                null,
+                java.time.Clock.systemUTC(),
+                com.projectsknowledge.general.cache.PersistentKnowledgeCache.disabled()
+            );
             this.result = result;
         }
 

@@ -6,11 +6,14 @@ import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -32,11 +35,14 @@ class CodexAppServerTransportTest {
     private final ScriptedCodexProcess second = new ScriptedCodexProcess();
     private final CodexAppServerTransport transport = new CodexAppServerTransport(mapper, properties, processes);
     private final CodexRuntimeSettings runtimeSettings = mock(CodexRuntimeSettings.class);
+    private final Clock clock = mock(Clock.class);
     private final CodexAppServerClient client = new CodexAppServerClient(
         mapper,
         properties,
         runtimeSettings,
-        transport
+        transport,
+        clock,
+        PersistentKnowledgeCache.disabled()
     );
 
     @BeforeEach
@@ -49,6 +55,7 @@ class CodexAppServerTransportTest {
             )
         );
         properties.getCodex().setTimeoutSeconds(3);
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-02T00:00:00Z"));
     }
 
     @AfterEach
@@ -110,6 +117,19 @@ class CodexAppServerTransportTest {
         assertThat(first.requests("model/list")).isEmpty();
         assertThat(first.requests("thread/start")).isEmpty();
         assertThat(first.requests("turn/start")).isEmpty();
+    }
+
+    @Test
+    void cachesTheModelCatalogInTheBackendForFiveHours() {
+        client.settings();
+        client.settings();
+
+        assertThat(first.requests("model/list")).hasSize(1);
+
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-02T05:00:00Z"));
+        client.settings();
+
+        assertThat(first.requests("model/list")).hasSize(2);
     }
 
     @Test
