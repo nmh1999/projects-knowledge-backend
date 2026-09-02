@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.RequestCancelledException;
+import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -15,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -100,7 +102,9 @@ final class CodexAppServerConnection implements AutoCloseable {
 
     String runTurn(String threadId, Map<String, Object> params, Duration timeout) {
         TurnResult turn = new TurnResult();
-        if (turns.putIfAbsent(threadId, turn) != null) throw failure("A turn is already active for this conversation.");
+        if (turns.putIfAbsent(threadId, turn) != null) throw requestFailure(
+            "A turn is already active for this conversation."
+        );
         long deadline = System.nanoTime() + timeout.toNanos();
         try {
             RequestCancellation.check();
@@ -108,7 +112,7 @@ final class CodexAppServerConnection implements AutoCloseable {
             String turnId = accepted.path("turn").path("id").asText();
             if (turnId.isBlank()) {
                 fail("Codex returned a missing turn identifier.");
-                throw failure("Codex returned a missing turn identifier.");
+                throw invalidResponse("Codex returned a missing turn identifier.");
             }
             turn.bind(turnId);
             try {
@@ -153,7 +157,7 @@ final class CodexAppServerConnection implements AutoCloseable {
             } catch (ExecutionException exception) {
                 RequestCancellation.check();
                 if (exception.getCause() instanceof KnowledgeException known) throw known;
-                throw failure("Codex request failed.");
+                throw requestFailure("Codex request failed.");
             }
         }
     }
@@ -179,14 +183,14 @@ final class CodexAppServerConnection implements AutoCloseable {
         } catch (TimeoutException exception) {
             // Kill this private process so an ambiguous timed-out turn cannot continue consuming tokens.
             fail("Timed out waiting for Codex. Retry the request when ready.");
-            throw failure("Timed out waiting for Codex. Retry the request when ready.");
+            throw timeout("Timed out waiting for Codex. Retry the request when ready.");
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             fail("Codex request was interrupted.");
-            throw failure("Codex request was interrupted.");
+            throw unavailable("Codex request was interrupted.");
         } catch (ExecutionException exception) {
             if (exception.getCause() instanceof KnowledgeException known) throw known;
-            throw failure("Codex request failed.");
+            throw requestFailure("Codex request failed.");
         }
     }
 
@@ -220,9 +224,7 @@ final class CodexAppServerConnection implements AutoCloseable {
             }
             CompletableFuture<JsonNode> pending = requests.get(message.path("id").asLong(-1));
             if (pending == null) return;
-            if (message.has("error")) pending.completeExceptionally(
-                failure("Codex rejected the request. Check its availability and sign-in.")
-            );
+            if (message.has("error")) pending.completeExceptionally(rejected(message.path("error")));
             else pending.complete(message.path("result"));
             return;
         }
@@ -236,12 +238,12 @@ final class CodexAppServerConnection implements AutoCloseable {
     private void write(JsonNode message) {
         if (!isHealthy()) {
             fail("Codex connection is unavailable. Retry the request when ready.");
-            throw failure("Codex connection is unavailable. Retry the request when ready.");
+            throw unavailable("Codex connection is unavailable. Retry the request when ready.");
         }
         // Queueing keeps both RPC deadlines and the reader responsive if the process stops reading stdin.
         if (!outgoing.offer(message)) {
             fail("Codex connection is overloaded. Retry when ready.");
-            throw failure("Codex connection is overloaded. Retry when ready.");
+            throw unavailable("Codex connection is overloaded. Retry when ready.");
         }
     }
 
@@ -281,7 +283,7 @@ final class CodexAppServerConnection implements AutoCloseable {
         } finally {
             outgoing.clear();
             writer.interrupt();
-            KnowledgeException error = failure(message);
+            KnowledgeException error = unavailable(message);
             requests.values().forEach(request -> request.completeExceptionally(error));
             turns
                 .values()
@@ -306,8 +308,46 @@ final class CodexAppServerConnection implements AutoCloseable {
         } catch (ExecutionException | TimeoutException ignored) {}
     }
 
-    private static KnowledgeException failure(String message) {
-        return new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, message);
+    private static KnowledgeException unavailable(String message) {
+        return new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.CODEX_UNAVAILABLE, message, true);
+    }
+
+    private static KnowledgeException timeout(String message) {
+        return new KnowledgeException(HttpStatus.GATEWAY_TIMEOUT, ApiErrorCode.CODEX_TIMEOUT, message, true);
+    }
+
+    private static KnowledgeException requestFailure(String message) {
+        return new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.CODEX_REQUEST_FAILED, message, true);
+    }
+
+    private static KnowledgeException invalidResponse(String message) {
+        return new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.CODEX_INVALID_RESPONSE, message, true);
+    }
+
+    /** Convert protocol errors into a stable browser-safe category without returning server details. */
+    private static KnowledgeException rejected(JsonNode error) {
+        String details = (error.path("message").asText("") + " " + error.path("data").path("message").asText(""))
+            .toLowerCase(Locale.ROOT);
+        boolean authentication =
+            error.path("code").asInt() == 401 ||
+            details.contains("auth") ||
+            details.contains("login") ||
+            details.contains("log in") ||
+            details.contains("sign in") ||
+            details.contains("unauthorized");
+        return authentication
+            ? new KnowledgeException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ApiErrorCode.CODEX_AUTH_REQUIRED,
+                "Codex sign-in is required.",
+                true
+            )
+            : new KnowledgeException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ApiErrorCode.CODEX_REQUEST_REJECTED,
+                "Codex rejected the request.",
+                true
+            );
     }
 
     private static final class TurnResult {
@@ -347,9 +387,9 @@ final class CodexAppServerConnection implements AutoCloseable {
             if ("item/completed".equals(method)) {
                 finalText = params.path("item").path("text").asText("");
             } else if (!"completed".equals(params.path("turn").path("status").asText())) {
-                answer.completeExceptionally(failure("Codex could not complete the answer."));
+                answer.completeExceptionally(requestFailure("Codex could not complete the answer."));
             } else if (finalText.isBlank()) {
-                answer.completeExceptionally(failure("Codex completed without an answer."));
+                answer.completeExceptionally(invalidResponse("Codex completed without an answer."));
             } else answer.complete(finalText);
         }
 

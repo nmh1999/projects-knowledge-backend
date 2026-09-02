@@ -13,20 +13,33 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(KnowledgeException.class)
     ResponseEntity<Map<String, Object>> handleKnowledge(KnowledgeException exception) {
-        return ResponseEntity.status(exception.getStatus()).body(error(exception.getMessage()));
+        return ResponseEntity.status(exception.getStatus()).body(
+            error(exception.getCode(), exception.getMessage(), exception.isRetryable())
+        );
     }
 
     @ExceptionHandler({ MethodArgumentNotValidException.class, MethodArgumentTypeMismatchException.class })
     ResponseEntity<Map<String, Object>> handleValidation() {
-        return ResponseEntity.badRequest().body(error("The request is invalid."));
+        return ResponseEntity.badRequest().body(error(ApiErrorCode.INVALID_REQUEST, "The request is invalid.", false));
     }
 
     @ExceptionHandler(Exception.class)
     ResponseEntity<Map<String, Object>> handleUnexpected() {
-        return ResponseEntity.internalServerError().body(error("Unable to analyze the project."));
+        return ResponseEntity.internalServerError().body(
+            error(ApiErrorCode.INTERNAL_ERROR, "Unable to analyze the project.", true)
+        );
     }
 
-    private Map<String, Object> error(String message) {
-        return Map.of("message", message, "timestamp", Instant.now().toString());
+    private Map<String, Object> error(ApiErrorCode code, String message, boolean retryable) {
+        return Map.of(
+            "code",
+            code,
+            "message",
+            message,
+            "retryable",
+            retryable,
+            "timestamp",
+            Instant.now().toString()
+        );
     }
 }

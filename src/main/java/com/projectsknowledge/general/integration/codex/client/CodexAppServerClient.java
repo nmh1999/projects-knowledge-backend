@@ -9,6 +9,7 @@ import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
+import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
@@ -117,7 +118,9 @@ public class CodexAppServerClient implements CacheClearable {
     public DtoCodexSettings updateSettings(ReqCodexSettings request) {
         if (!properties.getCodex().isEnabled()) throw new KnowledgeException(
             HttpStatus.SERVICE_UNAVAILABLE,
-            "Codex is disabled."
+            ApiErrorCode.CODEX_UNAVAILABLE,
+            "Codex is disabled.",
+            true
         );
         CodexAppServerConnection connection = transport.connection();
         JsonNode account = readAccount(connection);
@@ -167,7 +170,9 @@ public class CodexAppServerClient implements CacheClearable {
         } catch (IOException exception) {
             throw new KnowledgeException(
                 HttpStatus.SERVICE_UNAVAILABLE,
-                "Codex returned an invalid structured answer."
+                ApiErrorCode.CODEX_INVALID_RESPONSE,
+                "Codex returned an invalid structured answer.",
+                true
             );
         }
     }
@@ -182,7 +187,12 @@ public class CodexAppServerClient implements CacheClearable {
         try {
             return parseOverview(answer);
         } catch (IOException exception) {
-            throw new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, "Codex returned an invalid project overview.");
+            throw new KnowledgeException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ApiErrorCode.CODEX_INVALID_RESPONSE,
+                "Codex returned an invalid project overview.",
+                true
+            );
         }
     }
 
@@ -219,7 +229,12 @@ public class CodexAppServerClient implements CacheClearable {
             threadId = threadResult.path("thread").path("id").asText();
             if (threadId.isBlank()) {
                 connection.close();
-                throw new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, "Codex did not create a thread.");
+                throw new KnowledgeException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    ApiErrorCode.CODEX_INVALID_RESPONSE,
+                    "Codex did not create a thread.",
+                    true
+                );
             }
 
             Map<String, Object> turnParams = new LinkedHashMap<>();

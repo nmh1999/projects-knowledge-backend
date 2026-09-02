@@ -1,6 +1,7 @@
 package com.projectsknowledge.general.cancellation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -39,7 +40,10 @@ public class RequestCancellationFilter extends OncePerRequestFilter {
         } catch (IllegalArgumentException invalid) {
             response.setStatus(400);
             response.setContentType("application/json");
-            mapper.writeValue(response.getOutputStream(), Map.of("message", "Invalid request ID."));
+            mapper.writeValue(
+                response.getOutputStream(),
+                Map.of("code", ApiErrorCode.INVALID_REQUEST_ID, "message", "Invalid request ID.", "retryable", false)
+            );
             return;
         }
         boolean registered = false;
@@ -59,7 +63,17 @@ public class RequestCancellationFilter extends OncePerRequestFilter {
         } catch (KnowledgeException failure) {
             response.setStatus(failure.getStatus().value());
             response.setContentType("application/json");
-            mapper.writeValue(response.getOutputStream(), Map.of("message", failure.getMessage()));
+            mapper.writeValue(
+                response.getOutputStream(),
+                Map.of(
+                    "code",
+                    failure.getCode(),
+                    "message",
+                    failure.getMessage(),
+                    "retryable",
+                    failure.isRetryable()
+                )
+            );
         } catch (UncheckedIOException error) {
             throw error.getCause();
         } catch (ServletFailure error) {

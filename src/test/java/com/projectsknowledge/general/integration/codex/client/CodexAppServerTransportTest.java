@@ -9,6 +9,7 @@ import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
+import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -247,7 +248,11 @@ class CodexAppServerTransportTest {
         };
         assertThatThrownBy(() -> connection.runTurn("sample", Map.of("threadId", "sample"), Duration.ofMillis(150)))
             .isInstanceOf(KnowledgeException.class)
-            .hasMessageContaining("Timed out");
+            .hasMessageContaining("Timed out")
+            .satisfies(error ->
+                assertThat(((KnowledgeException) error).getCode()).isEqualTo(ApiErrorCode.CODEX_TIMEOUT)
+            )
+            .satisfies(error -> assertThat(((KnowledgeException) error).isRetryable()).isTrue());
         assertThat(first.isAlive()).isFalse();
         assertThat(first.requests("turn/start")).hasSize(1);
     }
@@ -276,11 +281,38 @@ class CodexAppServerTransportTest {
         };
         assertThatThrownBy(() -> ask("sample"))
             .isInstanceOf(KnowledgeException.class)
-            .hasMessageNotContaining("SECRET");
+            .hasMessageNotContaining("SECRET")
+            .satisfies(error ->
+                assertThat(((KnowledgeException) error).getCode()).isEqualTo(ApiErrorCode.CODEX_REQUEST_REJECTED)
+            );
         client.listThreads();
         verify(processes, times(1)).start();
         assertThat(first.requests("turn/start")).hasSize(1);
         assertThat(first.requests("thread/unsubscribe")).hasSize(1);
+    }
+
+    @Test
+    void classifiesAuthenticationRejectionsWithoutExposingProtocolDetails() {
+        first.handler = (peer, request) -> {
+            if (!"turn/start".equals(request.path("method").asText())) return false;
+            peer.send(
+                Map.of(
+                    "id",
+                    request.path("id").asLong(),
+                    "error",
+                    Map.of("code", 401, "message", "SECRET unauthorized account")
+                )
+            );
+            return true;
+        };
+
+        assertThatThrownBy(() -> ask("sample"))
+            .isInstanceOf(KnowledgeException.class)
+            .hasMessageNotContaining("SECRET")
+            .satisfies(error ->
+                assertThat(((KnowledgeException) error).getCode()).isEqualTo(ApiErrorCode.CODEX_AUTH_REQUIRED)
+            );
+        assertThat(first.requests("turn/start")).hasSize(1);
     }
 
     @Test

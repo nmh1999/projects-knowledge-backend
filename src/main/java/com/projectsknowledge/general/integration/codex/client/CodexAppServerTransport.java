@@ -2,6 +2,7 @@ package com.projectsknowledge.general.integration.codex.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
+import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -25,7 +26,12 @@ public class CodexAppServerTransport implements AutoCloseable {
 
     synchronized CodexAppServerConnection connection() {
         if (closed || !properties.getCodex().isEnabled()) {
-            throw new KnowledgeException(HttpStatus.SERVICE_UNAVAILABLE, "Codex integration is unavailable.");
+            throw new KnowledgeException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ApiErrorCode.CODEX_UNAVAILABLE,
+                "Codex integration is unavailable.",
+                true
+            );
         }
         if (connection != null && connection.isHealthy()) return connection;
         if (connection != null) connection.close();
@@ -45,7 +51,9 @@ public class CodexAppServerTransport implements AutoCloseable {
         } catch (IOException exception) {
             throw new KnowledgeException(
                 HttpStatus.SERVICE_UNAVAILABLE,
-                "Could not start Codex. Check its installation and sign-in."
+                ApiErrorCode.CODEX_UNAVAILABLE,
+                "Could not start Codex. Check its installation and sign-in.",
+                true
             );
         } catch (RuntimeException exception) {
             if (candidate != null) candidate.close();

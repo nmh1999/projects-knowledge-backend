@@ -9,8 +9,11 @@ import com.projectsknowledge.business.knowledge.schema.request.ReqIntegrationDet
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
 import com.projectsknowledge.business.knowledge.service.QuestionAskService;
 import com.projectsknowledge.general.exception.ApiExceptionHandler;
+import com.projectsknowledge.general.exception.ApiErrorCode;
+import com.projectsknowledge.general.exception.KnowledgeException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -149,5 +152,33 @@ class KnowledgeApiContractTest {
             .andExpect(status().isOk());
         verify(service).refreshIntegration(new ReqIntegrationDetails("sample", "Example integration", "en"));
         verify(service, never()).explainIntegration(any());
+    }
+
+    @Test
+    void returnsAStableRetryContractWithoutExposingTransportDetails() throws Exception {
+        when(service.ask(any())).thenThrow(
+            new KnowledgeException(
+                HttpStatus.GATEWAY_TIMEOUT,
+                ApiErrorCode.CODEX_TIMEOUT,
+                "Timed out waiting for Codex.",
+                true
+            )
+        );
+
+        mvc
+            .perform(
+                post("/api/questions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"projectId":"sample","question":"Explain the flow","language":"en","mode":"basic"}
+                        """
+                    )
+            )
+            .andExpect(status().isGatewayTimeout())
+            .andExpect(jsonPath("$.code").value("CODEX_TIMEOUT"))
+            .andExpect(jsonPath("$.message").value("Timed out waiting for Codex."))
+            .andExpect(jsonPath("$.retryable").value(true))
+            .andExpect(jsonPath("$.timestamp").exists());
     }
 }

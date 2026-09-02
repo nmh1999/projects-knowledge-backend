@@ -1,5 +1,6 @@
 package com.projectsknowledge.general.cancellation;
 
+import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import org.springframework.http.HttpStatus;
 
@@ -7,6 +8,6 @@ import org.springframework.http.HttpStatus;
 public final class RequestCancelledException extends KnowledgeException {
 
     public RequestCancelledException() {
-        super(HttpStatus.CONFLICT, "The request was cancelled.");
+        super(HttpStatus.CONFLICT, ApiErrorCode.REQUEST_CANCELLED, "The request was cancelled.", false);
     }
 }
