@@ -103,11 +103,11 @@ class CodexAppServerTransportTest {
         assertThat(status.connected()).isTrue();
         assertThat(status.ready()).isTrue();
         assertThat(status.authenticationType()).isEqualTo("chatgpt");
-        assertThat(status.model()).isEqualTo("test-default");
+        assertThat(status.model()).isEmpty();
         assertThat(status.reasoningEffort()).isEqualTo("medium");
         assertThat(status.activeRequests()).isZero();
         assertThat(first.requests("account/read")).hasSize(1);
-        assertThat(first.requests("model/list")).hasSize(1);
+        assertThat(first.requests("model/list")).isEmpty();
         assertThat(first.requests("thread/start")).isEmpty();
         assertThat(first.requests("turn/start")).isEmpty();
     }

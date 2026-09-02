@@ -64,7 +64,16 @@ public class CodexAppServerClient {
 
     /** Lightweight capability check; never exposes account identifiers or starts a model turn. */
     public DtoCodexStatus status() {
-        return settings().status();
+        var selected = runtimeSettings.current();
+        if (!properties.getCodex().isEnabled()) {
+            return DtoCodexStatus.disabled(selected.model(), selected.reasoningEffort());
+        }
+        try {
+            CodexAppServerConnection connection = transport.connection();
+            return buildStatus(connection, readAccount(connection), selected.model(), selected.reasoningEffort());
+        } catch (KnowledgeException exception) {
+            return DtoCodexStatus.unavailable(selected.model(), selected.reasoningEffort());
+        }
     }
 
     /** Available models and efforts come directly from the connected Codex runtime. */
@@ -254,21 +263,35 @@ public class CodexAppServerClient {
         List<DtoCodexModel> models,
         CodexRuntimeSettings.Selection selected
     ) {
+        DtoCodexModel effective = findModel(models, selected.model());
+        String effectiveModel = effective == null ? selected.model() : effective.id();
+        DtoCodexStatus status = buildStatus(
+            connection,
+            account,
+            effectiveModel,
+            selected.reasoningEffort()
+        );
+        return new DtoCodexSettings(status, selected.model(), models);
+    }
+
+    private DtoCodexStatus buildStatus(
+        CodexAppServerConnection connection,
+        JsonNode account,
+        String model,
+        String reasoningEffort
+    ) {
         JsonNode accountDetails = account.path("account");
         boolean authenticated = !accountDetails.isMissingNode() && !accountDetails.isNull();
         boolean ready = authenticated || !account.path("requiresOpenaiAuth").asBoolean(true);
-        DtoCodexModel effective = findModel(models, selected.model());
-        String effectiveModel = effective == null ? selected.model() : effective.id();
-        DtoCodexStatus status = new DtoCodexStatus(
+        return new DtoCodexStatus(
             true,
             true,
             ready,
             authenticated ? accountDetails.path("type").asText("") : "",
-            effectiveModel,
-            selected.reasoningEffort(),
+            model,
+            reasoningEffort,
             connection.activeTurns()
         );
-        return new DtoCodexSettings(status, selected.model(), models);
     }
 
     private List<DtoCodexModel> parseModels(JsonNode response) {
