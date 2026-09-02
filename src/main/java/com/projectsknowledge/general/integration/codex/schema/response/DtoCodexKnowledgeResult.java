@@ -43,7 +43,6 @@ public record DtoCodexKnowledgeResult(
         String filePath,
         String symbol,
         int startLine,
-        int endLine,
-        String excerpt
+        int endLine
     ) {}
 }

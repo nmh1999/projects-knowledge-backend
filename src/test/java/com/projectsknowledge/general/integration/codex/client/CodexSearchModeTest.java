@@ -35,6 +35,9 @@ class CodexSearchModeTest {
         assertThat(schema.path("properties").has("sources")).isFalse();
         assertThat(client.outputSchema(SearchMode.ADVANCED).path("properties").has("technicalFlow")).isTrue();
         assertThat(client.outputSchema(SearchMode.ADVANCED).at("/properties/sources/maxItems").asInt()).isEqualTo(8);
+        assertThat(
+            client.outputSchema(SearchMode.ADVANCED).at("/properties/sources/items/properties").has("excerpt")
+        ).isFalse();
     }
 
     @Test
@@ -248,7 +251,7 @@ class CodexSearchModeTest {
                "relationships":["DDL: orders.customer_id -> customers.id; many-to-one"]}],
              "risks":["Deployed state not checked."],
              "sources":[{"repositoryName":"sample","filePath":"schema.sql","symbol":"orders",
-               "startLine":1,"endLine":12,"excerpt":"CREATE TABLE orders"}]}
+               "startLine":1,"endLine":12}]}
             """,
             SearchMode.DATABASE
         );

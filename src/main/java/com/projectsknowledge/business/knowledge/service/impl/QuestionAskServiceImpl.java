@@ -318,7 +318,7 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
                     source.symbol(),
                     start,
                     end,
-                    source.excerpt()
+                    ""
                 )
             );
         }

@@ -165,8 +165,7 @@ class QuestionAskServiceTest {
                     "schema.sql",
                     "orders",
                     1,
-                    1,
-                    "CREATE TABLE orders"
+                    1
                 )
             ),
             true
@@ -187,6 +186,7 @@ class QuestionAskServiceTest {
             .satisfies(source -> {
                 assertThat(source.repositoryId()).isEqualTo("repository");
                 assertThat(source.filePath()).isEqualTo("schema.sql");
+                assertThat(source.excerpt()).isEmpty();
             });
         assertThat(answer.apis()).isEmpty();
         assertThat(answer.businessFlow()).isEmpty();

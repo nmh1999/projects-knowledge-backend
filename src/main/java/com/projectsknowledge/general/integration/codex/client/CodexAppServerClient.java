@@ -755,9 +755,7 @@ public class CodexAppServerClient implements CacheClearable {
                         "startLine",
                         integerSchema(),
                         "endLine",
-                        integerSchema(),
-                        "excerpt",
-                        stringSchema()
+                        integerSchema()
                     )
                 ),
                 8
