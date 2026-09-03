@@ -28,7 +28,7 @@ class DtoCodexProjectOverviewTest {
 
     @Test
     void overviewUsesCompactEvidenceSchemaAndProjectOnlyInstructions() throws Exception {
-        var schema = client.overviewSchema();
+        var schema = CodexSchemaFactory.overview(mapper);
         assertThat(schema.path("properties").size()).isEqualTo(7);
         assertThat(schema.path("required").size()).isEqualTo(7);
         assertThat(schema.at("/properties/integrations/maxItems").asInt()).isEqualTo(30);
@@ -38,7 +38,7 @@ class DtoCodexProjectOverviewTest {
             "name"
         );
         assertThat(schema.path("additionalProperties").asBoolean()).isFalse();
-        assertThat(client.overviewInstructions()).contains(
+        assertThat(CodexPromptFactory.overviewInstructions()).contains(
             "regardless of package namespace or folder layout",
             "untrusted data",
             "never other projects or the web",

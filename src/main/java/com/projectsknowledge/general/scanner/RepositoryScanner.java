@@ -8,8 +8,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +51,42 @@ public class RepositoryScanner implements CacheClearable {
         "pnpm-lock.yaml",
         "desktop.ini"
     );
+    private static final Set<String> MANIFEST_FILES = Set.of(
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "package.json"
+    );
+    private static final Set<String> EXTENSIONLESS_TEXT_FILES = Set.of("dockerfile", "mvnw", "gradlew");
+    private static final Map<String, String> FRAMEWORK_KEYWORDS = Map.ofEntries(
+        Map.entry("spring-boot", "Spring Boot"),
+        Map.entry("@angular/core", "Angular"),
+        Map.entry("\"next\"", "Next.js"),
+        Map.entry("\"react\"", "React"),
+        Map.entry("primeng", "PrimeNG"),
+        Map.entry("hibernate", "Hibernate/JPA"),
+        Map.entry("flyway", "Flyway"),
+        Map.entry("liquibase", "Liquibase"),
+        Map.entry("openfeign", "OpenFeign"),
+        Map.entry("shedlock", "ShedLock"),
+        Map.entry("redis", "Redis")
+    );
+    private static final Map<String, String> DATABASE_KEYWORDS = Map.of(
+        "oracle",
+        "Oracle",
+        "mssql",
+        "SQL Server",
+        "h2database",
+        "H2"
+    );
+    private static final Map<String, String> MESSAGING_KEYWORDS = Map.of(
+        "starter-amqp",
+        "RabbitMQ/AMQP",
+        "qpid-jms",
+        "JMS/Qpid",
+        "kafka",
+        "Kafka"
+    );
     private static final Set<String> TEXT_EXTENSIONS = Set.of(
         "java",
         "kt",
@@ -91,11 +125,6 @@ public class RepositoryScanner implements CacheClearable {
 
     public List<Path> files(Repository repository) {
         return snapshot(repository).files();
-    }
-
-    /** A cheap, short-lived signature prevents disk-cached answers surviving repository changes. */
-    public String fingerprint(Repository repository) {
-        return snapshot(repository).fingerprint();
     }
 
     private FileSnapshot snapshot(Repository repository) {
@@ -189,29 +218,9 @@ public class RepositoryScanner implements CacheClearable {
 
             if (isManifest(name)) {
                 String content = String.join("\n", readLines(repository, file)).toLowerCase(Locale.ROOT);
-                detect(
-                    content,
-                    frameworks,
-                    Map.ofEntries(
-                        Map.entry("spring-boot", "Spring Boot"),
-                        Map.entry("@angular/core", "Angular"),
-                        Map.entry("\"next\"", "Next.js"),
-                        Map.entry("\"react\"", "React"),
-                        Map.entry("primeng", "PrimeNG"),
-                        Map.entry("hibernate", "Hibernate/JPA"),
-                        Map.entry("flyway", "Flyway"),
-                        Map.entry("liquibase", "Liquibase"),
-                        Map.entry("openfeign", "OpenFeign"),
-                        Map.entry("shedlock", "ShedLock"),
-                        Map.entry("redis", "Redis")
-                    )
-                );
-                detect(content, databases, Map.of("oracle", "Oracle", "mssql", "SQL Server", "h2database", "H2"));
-                detect(
-                    content,
-                    messaging,
-                    Map.of("starter-amqp", "RabbitMQ/AMQP", "qpid-jms", "JMS/Qpid", "kafka", "Kafka")
-                );
+                detect(content, frameworks, FRAMEWORK_KEYWORDS);
+                detect(content, databases, DATABASE_KEYWORDS);
+                detect(content, messaging, MESSAGING_KEYWORDS);
             }
         }
         return new RepositoryMetadata(
@@ -244,29 +253,7 @@ public class RepositoryScanner implements CacheClearable {
     }
 
     private FileSnapshot discoverSnapshot(Repository repository) {
-        List<Path> files = discoverFiles(repository);
-        Path root = repository.getPath().toAbsolutePath().normalize();
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            for (Path file : files.stream().sorted().toList()) {
-                Path relative = root.relativize(file);
-                update(digest, relative.toString().replace('\\', '/'));
-                try {
-                    update(digest, Long.toString(Files.size(file)));
-                    update(digest, Long.toString(Files.getLastModifiedTime(file).toMillis()));
-                } catch (IOException ignored) {
-                    update(digest, "unavailable");
-                }
-            }
-            return new FileSnapshot(Instant.now(), files, java.util.HexFormat.of().formatHex(digest.digest()));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is unavailable.", impossible);
-        }
-    }
-
-    private void update(MessageDigest digest, String value) {
-        digest.update(value.getBytes(StandardCharsets.UTF_8));
-        digest.update((byte) 0);
+        return new FileSnapshot(Instant.now(), discoverFiles(repository));
     }
 
     private boolean isIgnored(Path file, Path root) {
@@ -278,7 +265,7 @@ public class RepositoryScanner implements CacheClearable {
 
     private boolean isTextFile(Path file) {
         String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (Set.of("dockerfile", "mvnw", "gradlew").contains(name)) return true;
+        if (EXTENSIONLESS_TEXT_FILES.contains(name)) return true;
         int dot = name.lastIndexOf('.');
         return dot >= 0 && TEXT_EXTENSIONS.contains(name.substring(dot + 1));
     }
@@ -307,12 +294,7 @@ public class RepositoryScanner implements CacheClearable {
     }
 
     private boolean isManifest(String name) {
-        return (
-            name.equals("pom.xml") ||
-            name.equals("build.gradle") ||
-            name.equals("build.gradle.kts") ||
-            name.equals("package.json")
-        );
+        return MANIFEST_FILES.contains(name);
     }
 
     private void detect(String content, Set<String> target, Map<String, String> keywords) {
@@ -352,5 +334,5 @@ public class RepositoryScanner implements CacheClearable {
         }
     }
 
-    private record FileSnapshot(Instant loadedAt, List<Path> files, String fingerprint) {}
+    private record FileSnapshot(Instant loadedAt, List<Path> files) {}
 }

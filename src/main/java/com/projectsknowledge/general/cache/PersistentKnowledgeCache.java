@@ -2,13 +2,11 @@ package com.projectsknowledge.general.cache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
+import com.projectsknowledge.general.util.Sha256;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -16,7 +14,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,17 +78,9 @@ public class PersistentKnowledgeCache implements CacheClearable {
         }
     }
 
-    public boolean isAvailable() {
-        return available;
-    }
-
-    public Path path() {
-        return databasePath;
-    }
-
     public synchronized <T> Optional<T> find(String namespace, String key, Class<T> type, Instant now) {
         if (!available) return Optional.empty();
-        String hash = hash(key);
+        String hash = Sha256.hash(key);
         String sql = "SELECT response_json, expires_at FROM knowledge_cache WHERE namespace = ? AND cache_key = ?";
         try (Connection connection = connection()) {
             String json;
@@ -141,7 +130,7 @@ public class PersistentKnowledgeCache implements CacheClearable {
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setString(1, namespace);
-                statement.setString(2, hash(key));
+                statement.setString(2, Sha256.hash(key));
                 statement.setString(3, mapper.writeValueAsString(value));
                 statement.setString(4, updatedAt.toString());
                 statement.setString(5, expiresAt.toString());
@@ -152,18 +141,6 @@ public class PersistentKnowledgeCache implements CacheClearable {
             connection.commit();
         } catch (IOException | SQLException | RuntimeException exception) {
             log.warn("Could not write persistent cache entry: {}", exception.getMessage());
-        }
-    }
-
-    public synchronized void pruneExpired(Instant now) {
-        if (!available) return;
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(
-            "DELETE FROM knowledge_cache WHERE expires_at <= ?"
-        )) {
-            statement.setString(1, now.toString());
-            statement.executeUpdate();
-        } catch (SQLException exception) {
-            log.warn("Could not prune persistent cache: {}", exception.getMessage());
         }
     }
 
@@ -223,12 +200,4 @@ public class PersistentKnowledgeCache implements CacheClearable {
         }
     }
 
-    private String hash(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is unavailable.", impossible);
-        }
-    }
 }

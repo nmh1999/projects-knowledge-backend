@@ -8,16 +8,13 @@ import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
+import com.projectsknowledge.general.util.Sha256;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -118,7 +115,7 @@ public class CodexProjectCatalog implements CacheClearable {
     private Project toProject(Path workspace) {
         RequestCancellation.check();
         Project project = new Project();
-        project.setId("codex-" + digest(key(workspace)).substring(0, 16));
+        project.setId("codex-" + Sha256.hash(key(workspace)).substring(0, 16));
         project.setName(workspace.getFileName() == null ? workspace.toString() : workspace.getFileName().toString());
         project.setRepositories(repositories(workspace));
         return project;
@@ -170,7 +167,7 @@ public class CodexProjectCatalog implements CacheClearable {
 
     private Repository repository(Path path) {
         Repository repository = new Repository();
-        repository.setId("repo-" + digest(key(path)).substring(0, 16));
+        repository.setId("repo-" + Sha256.hash(key(path)).substring(0, 16));
         repository.setName(path.getFileName() == null ? path.toString() : path.getFileName().toString());
         repository.setPath(path.toAbsolutePath().normalize());
         repository.setType(detectType(path));
@@ -226,16 +223,6 @@ public class CodexProjectCatalog implements CacheClearable {
 
     private String key(Path path) {
         return path.toAbsolutePath().normalize().toString().toLowerCase(Locale.ROOT);
-    }
-
-    private String digest(String value) {
-        try {
-            return HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))
-            );
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException(exception);
-        }
     }
 
     private record Cache(Instant loadedAt, List<Project> projects) {}

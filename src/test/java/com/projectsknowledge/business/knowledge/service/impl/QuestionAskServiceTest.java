@@ -166,6 +166,13 @@ class QuestionAskServiceTest {
                     "orders",
                     1,
                     1
+                ),
+                new DtoCodexKnowledgeResult.SourceEvidence(
+                    "Repository",
+                    "invalid\u0000path.sql",
+                    "invalid",
+                    1,
+                    1
                 )
             ),
             true

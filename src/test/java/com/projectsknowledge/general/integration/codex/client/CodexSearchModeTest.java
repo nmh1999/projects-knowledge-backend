@@ -3,6 +3,7 @@ package com.projectsknowledge.general.integration.codex.client;
 import static org.assertj.core.api.Assertions.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
 import com.projectsknowledge.general.config.CodexRuntimeSettings;
@@ -24,33 +25,36 @@ class CodexSearchModeTest {
 
     @Test
     void basicRequestsOnlySummaryConfidenceAndScope() {
-        var schema = client.outputSchema(SearchMode.BASIC);
+        var schema = schema(SearchMode.BASIC);
         var fields = new ArrayList<String>();
         schema.path("properties").fieldNames().forEachRemaining(fields::add);
         assertThat(fields).containsExactly("inScope", "answer", "confidence");
         assertThat(schema.path("additionalProperties").asBoolean()).isFalse();
         assertThat(schema.at("/properties/answer")).isEqualTo(
-            client.outputSchema(SearchMode.ADVANCED).at("/properties/answer")
+            schema(SearchMode.ADVANCED).at("/properties/answer")
         );
         assertThat(schema.path("properties").has("sources")).isFalse();
-        assertThat(client.outputSchema(SearchMode.ADVANCED).path("properties").has("technicalFlow")).isTrue();
-        assertThat(client.outputSchema(SearchMode.ADVANCED).at("/properties/sources/maxItems").asInt()).isEqualTo(8);
+        assertThat(schema(SearchMode.ADVANCED).path("properties").has("technicalFlow")).isTrue();
+        assertThat(schema(SearchMode.ADVANCED).at("/properties/sources/maxItems").asInt()).isEqualTo(8);
         assertThat(
-            client.outputSchema(SearchMode.ADVANCED).at("/properties/sources/items/properties").has("excerpt")
+            schema(SearchMode.ADVANCED).at("/properties/sources/items/properties").has("excerpt")
         ).isFalse();
     }
 
     @Test
     void bothModesUseTheSameSummaryAndEvidenceInstructions() {
-        for (String instructions : new String[] { client.basicInstructions(), client.advancedInstructions() }) {
+        for (String instructions : new String[] {
+            CodexPromptFactory.basicInstructions(),
+            CodexPromptFactory.advancedInstructions()
+        }) {
             assertThat(instructions)
-                .contains(CodexAppServerClient.SUMMARY_INSTRUCTIONS)
-                .contains(CodexAppServerClient.INVESTIGATION_INSTRUCTIONS)
+                .contains(CodexPromptFactory.SUMMARY_INSTRUCTIONS)
+                .contains(CodexPromptFactory.INVESTIGATION_INSTRUCTIONS)
                 .contains("at most 120 words")
                 .contains("distinguish multiple stages or implementations")
                 .doesNotContain("90 words", "at most 2 targeted searches", "at most 3 files");
         }
-        assertThat(client.basicInstructions()).contains(
+        assertThat(CodexPromptFactory.basicInstructions()).contains(
             "Do not include code snippets, file paths, citations, or source excerpts"
         );
     }
@@ -80,7 +84,7 @@ class CodexSearchModeTest {
 
     @Test
     void workflowSchemaAndInstructionsFocusOnVerifiedBusinessBehavior() {
-        var schema = client.outputSchema(SearchMode.WORKFLOW);
+        var schema = schema(SearchMode.WORKFLOW);
         var fields = new ArrayList<String>();
         schema.path("properties").fieldNames().forEachRemaining(fields::add);
         assertThat(fields).containsExactlyInAnyOrder(
@@ -99,16 +103,17 @@ class CodexSearchModeTest {
         assertThat(schema.at("/properties/sources/maxItems").asInt()).isEqualTo(4);
         assertThat(schema.at("/properties/workflowDiagram/properties/nodes/maxItems").asInt()).isEqualTo(10);
         assertThat(schema.at("/properties/workflowDiagram/properties/edges/maxItems").asInt()).isEqualTo(16);
-        assertThat(client.outputSchema(SearchMode.BASIC).path("properties").has("workflowDiagram")).isFalse();
-        assertThat(client.outputSchema(SearchMode.ADVANCED).path("properties").has("workflowDiagram")).isFalse();
-        assertThat(client.instructions(SearchMode.WORKFLOW)).contains(
+        assertThat(schema(SearchMode.BASIC).path("properties").has("workflowDiagram")).isFalse();
+        assertThat(schema(SearchMode.ADVANCED).path("properties").has("workflowDiagram")).isFalse();
+        assertThat(CodexPromptFactory.instructions(SearchMode.WORKFLOW)).contains(
             "actual authorization checks",
             "not a real event",
             "never stitch unrelated flows together"
         );
-        assertThat(client.instructions(SearchMode.BASIC)).endsWith(client.basicInstructions());
-        assertThat(client.instructions(SearchMode.ADVANCED)).endsWith(client.advancedInstructions());
-        assertThat(client.outputSchema(SearchMode.ADVANCED).path("properties").has("workflowExample")).isFalse();
+        assertThat(CodexPromptFactory.instructions(SearchMode.BASIC)).endsWith(CodexPromptFactory.basicInstructions());
+        assertThat(CodexPromptFactory.instructions(SearchMode.ADVANCED))
+            .endsWith(CodexPromptFactory.advancedInstructions());
+        assertThat(schema(SearchMode.ADVANCED).path("properties").has("workflowExample")).isFalse();
     }
 
     @Test
@@ -180,11 +185,11 @@ class CodexSearchModeTest {
     @Test
     void allModesRequireScopeAndShareTheSameScopeGate() throws Exception {
         for (SearchMode mode : SearchMode.values()) {
-            var schema = client.outputSchema(mode);
+            var schema = schema(mode);
             assertThat(schema.at("/properties/inScope/type").asText()).isEqualTo("boolean");
             assertThat(schema.path("required").toString()).contains("\"inScope\"");
-            assertThat(client.instructions(mode))
-                .startsWith(CodexAppServerClient.SCOPE_INSTRUCTIONS)
+            assertThat(CodexPromptFactory.instructions(mode))
+                .startsWith(CodexPromptFactory.SCOPE_INSTRUCTIONS)
                 .contains(
                     "stop immediately without searching",
                     "mixes project questions",
@@ -209,7 +214,7 @@ class CodexSearchModeTest {
 
     @Test
     void databaseSchemaOnlyRequestsRelevantBoundedSections() {
-        var schema = client.outputSchema(SearchMode.DATABASE);
+        var schema = schema(SearchMode.DATABASE);
         var fields = new ArrayList<String>();
         schema.path("properties").fieldNames().forEachRemaining(fields::add);
         assertThat(fields).containsExactlyInAnyOrder(
@@ -231,13 +236,13 @@ class CodexSearchModeTest {
         assertThat(table.at("/properties/columns/maxItems").asInt()).isEqualTo(8);
         assertThat(table.at("/properties/relationships/maxItems").asInt()).isEqualTo(6);
         assertThat(
-            client.outputSchema(SearchMode.ADVANCED).at("/properties/database/items/properties").has("columns")
+            schema(SearchMode.ADVANCED).at("/properties/database/items/properties").has("columns")
         ).isFalse();
-        assertThat(client.instructions(SearchMode.DATABASE))
-            .contains(CodexAppServerClient.SUMMARY_INSTRUCTIONS, CodexAppServerClient.INVESTIGATION_INSTRUCTIONS)
+        assertThat(CodexPromptFactory.instructions(SearchMode.DATABASE))
+            .contains(CodexPromptFactory.SUMMARY_INSTRUCTIONS, CodexPromptFactory.INVESTIGATION_INSTRUCTIONS)
             .contains("DATABASE mode", "ORM-only associations", "Never connect to a database", "execute SQL")
             .contains("no database evidence", "Never infer physical table names", "Do not generate SQL scripts")
-            .endsWith(client.databaseInstructions());
+            .endsWith(CodexPromptFactory.databaseInstructions());
     }
 
     @Test
@@ -319,5 +324,9 @@ class CodexSearchModeTest {
         assertThatThrownBy(() -> mapper.readValue("{\"mode\":\"unknown\"}", ReqQuestion.class)).isInstanceOf(
             java.io.IOException.class
         );
+    }
+
+    private ObjectNode schema(SearchMode mode) {
+        return CodexSchemaFactory.answer(mapper, mode);
     }
 }

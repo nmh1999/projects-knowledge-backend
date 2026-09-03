@@ -6,6 +6,7 @@ import com.projectsknowledge.business.knowledge.schema.request.ReqIntegrationDet
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
 import com.projectsknowledge.business.knowledge.schema.response.DtoKnowledgeAnswer;
 import com.projectsknowledge.business.knowledge.schema.response.DtoKnowledgeAnswer.SourceReference;
+import com.projectsknowledge.business.knowledge.schema.response.DtoWorkflowDiagram;
 import com.projectsknowledge.business.knowledge.service.QuestionAskService;
 import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.entity.Repository;
@@ -18,6 +19,7 @@ import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -36,6 +38,10 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
 
     private static final String ANSWER_NAMESPACE = "answer-v2";
     private static final String INTEGRATION_NAMESPACE = "integration-v2";
+    private static final String OUT_OF_SCOPE_EN =
+        "This question is outside the project scope. I can only answer about the selected project's code, features, workflows, and integrations. Please ask a project-specific question.";
+    private static final String OUT_OF_SCOPE_AR =
+        "هذا السؤال خارج نطاق المشاريع. أستطيع الإجابة فقط عن الكود والوظائف ومسارات العمل والتكاملات في المشروع المحدد. أعد صياغة سؤالك ليكون متعلقًا به.";
 
     private final ProjectRetrievalService projectService;
     private final CodexAppServerClient codexClient;
@@ -83,7 +89,7 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
 
     private DtoKnowledgeAnswer answerQuestion(ReqQuestion request, boolean refresh) {
         Project project = projectService.requireProject(request.projectId());
-        String language = "ar".equalsIgnoreCase(request.language()) ? "ar" : "en";
+        String language = normalizeLanguage(request.language());
         CacheKey key = cacheKey(project, language, normalizeQuestion(request.question()), request.mode(), false);
         return resolve(answerCache, ANSWER_NAMESPACE, key, properties.getCodex().getAnswerCacheSeconds(), refresh, () ->
             query(project, request.question(), language, request.mode())
@@ -108,7 +114,7 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
 
     private DtoKnowledgeAnswer integrationDetails(ReqIntegrationDetails request, boolean refresh) {
         Project project = projectService.requireProject(request.projectId());
-        String language = "ar".equalsIgnoreCase(request.language()) ? "ar" : "en";
+        String language = normalizeLanguage(request.language());
         String name = request.name().strip();
         CacheKey key = cacheKey(project, language, name.toLowerCase(Locale.ROOT), SearchMode.ADVANCED, true);
         return resolve(
@@ -135,33 +141,29 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
     }
 
     private DtoKnowledgeAnswer outOfScope(Project project, String question, String language) {
-        String message = "ar".equals(language)
-            ? "هذا السؤال خارج نطاق المشاريع. أستطيع الإجابة فقط عن الكود والوظائف ومسارات العمل والتكاملات في المشروع المحدد. أعد صياغة سؤالك ليكون متعلقًا به."
-            : "This question is outside the project scope. I can only answer about the selected project's code, features, workflows, and integrations. Please ask a project-specific question.";
-        return new DtoKnowledgeAnswer(
-            project.getName(),
-            question,
-            message,
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            "low",
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            false,
-            "",
-            com.projectsknowledge.business.knowledge.schema.response.DtoWorkflowDiagram.empty(),
-            false,
-            null,
-            null
-        );
+        String message = "ar".equals(language) ? OUT_OF_SCOPE_AR : OUT_OF_SCOPE_EN;
+        return DtoKnowledgeAnswer.builder()
+            .project(project.getName())
+            .question(question)
+            .summary(message)
+            .businessFlow(List.of())
+            .technicalFlow(List.of())
+            .apis(List.of())
+            .database(List.of())
+            .integrations(List.of())
+            .scheduledJobs(List.of())
+            .technicalDetails(List.of())
+            .sources(List.of())
+            .confidence("low")
+            .keyFindings(List.of())
+            .roles(List.of())
+            .risks(List.of())
+            .followUpQuestions(List.of())
+            .enoughEvidence(false)
+            .workflowExample("")
+            .workflowDiagram(DtoWorkflowDiagram.empty())
+            .inScope(false)
+            .build();
     }
 
     /** Share concurrent work; refresh replaces the snapshot only after a successful analysis. */
@@ -287,6 +289,10 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
         return question.strip().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
+    private String normalizeLanguage(String language) {
+        return "ar".equalsIgnoreCase(language) ? "ar" : "en";
+    }
+
     private List<SourceReference> mapSources(Project project, List<DtoCodexKnowledgeResult.SourceEvidence> sources) {
         return sources
             .stream()
@@ -296,14 +302,24 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
     }
 
     private Optional<SourceReference> mapSource(Project project, DtoCodexKnowledgeResult.SourceEvidence source) {
+        if (source == null || source.filePath() == null || source.filePath().isBlank()) return Optional.empty();
+        Path requested;
+        try {
+            requested = Path.of(source.filePath());
+        } catch (InvalidPathException exception) {
+            return Optional.empty();
+        }
         List<Repository> repositories = project
             .getRepositories()
             .stream()
-            .sorted(Comparator.comparing(repository -> !repository.getName().equalsIgnoreCase(source.repositoryName())))
+            .sorted(
+                Comparator.comparing(repository ->
+                    source.repositoryName() == null || !repository.getName().equalsIgnoreCase(source.repositoryName())
+                )
+            )
             .toList();
         for (Repository repository : repositories) {
             Path root = repository.getPath().toAbsolutePath().normalize();
-            Path requested = Path.of(source.filePath());
             Path file = requested.isAbsolute() ? requested.normalize() : root.resolve(requested).normalize();
             if (!file.startsWith(root) || !Files.isRegularFile(file)) continue;
             String relative = root.relativize(file).toString().replace('\\', '/');
