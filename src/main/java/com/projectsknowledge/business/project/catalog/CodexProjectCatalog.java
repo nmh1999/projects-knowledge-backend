@@ -114,11 +114,11 @@ public class CodexProjectCatalog implements CacheClearable {
 
     private Project toProject(Path workspace) {
         RequestCancellation.check();
-        Project project = new Project();
-        project.setId("codex-" + Sha256.hash(key(workspace)).substring(0, 16));
-        project.setName(workspace.getFileName() == null ? workspace.toString() : workspace.getFileName().toString());
-        project.setRepositories(repositories(workspace));
-        return project;
+        return Project.builder()
+            .id("codex-" + Sha256.hash(key(workspace)).substring(0, 16))
+            .name(workspace.getFileName() == null ? workspace.toString() : workspace.getFileName().toString())
+            .repositories(repositories(workspace))
+            .build();
     }
 
     private List<Repository> repositories(Path workspace) {
@@ -166,12 +166,12 @@ public class CodexProjectCatalog implements CacheClearable {
     }
 
     private Repository repository(Path path) {
-        Repository repository = new Repository();
-        repository.setId("repo-" + Sha256.hash(key(path)).substring(0, 16));
-        repository.setName(path.getFileName() == null ? path.toString() : path.getFileName().toString());
-        repository.setPath(path.toAbsolutePath().normalize());
-        repository.setType(detectType(path));
-        return repository;
+        return Repository.builder()
+            .id("repo-" + Sha256.hash(key(path)).substring(0, 16))
+            .name(path.getFileName() == null ? path.toString() : path.getFileName().toString())
+            .path(path.toAbsolutePath().normalize())
+            .type(detectType(path))
+            .build();
     }
 
     private boolean isRepository(Path path) {

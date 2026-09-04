@@ -56,7 +56,13 @@ class ProjectOverviewServiceTest {
         project = project("project", "Runtime project", repository);
         Files.createDirectories(root.resolve("arbitrary/place"));
         Files.writeString(root.resolve("arbitrary/place/Remote.java"), "class Remote {}\n");
-        service = new ProjectOverviewServiceImpl(client, new RepositoryScanner(properties), properties, clock);
+        service = new ProjectOverviewServiceImpl(
+            client,
+            new RepositoryScanner(properties),
+            properties,
+            clock,
+            PersistentKnowledgeCache.disabled()
+        );
         when(client.overview(anyList())).thenReturn(
             result(List.of(new IntegrationEvidence("Orbit", repository.getName(), "arbitrary/place/Remote.java")))
         );

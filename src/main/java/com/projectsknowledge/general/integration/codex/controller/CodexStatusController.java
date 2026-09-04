@@ -1,9 +1,9 @@
 package com.projectsknowledge.general.integration.codex.controller;
 
-import com.projectsknowledge.general.integration.codex.client.CodexModelService;
 import com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexSettings;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexStatus;
+import com.projectsknowledge.general.integration.codex.service.CodexModelService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

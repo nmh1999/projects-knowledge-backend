@@ -15,10 +15,12 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /** Stores successful question results and shares identical analyses until their configured expiry. */
 @Component
+@RequiredArgsConstructor
 public class QuestionAnswerCache implements CacheClearable {
 
     private static final String ANSWER_NAMESPACE = "answer-v2";
@@ -30,16 +32,6 @@ public class QuestionAnswerCache implements CacheClearable {
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> answers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> integrations = new ConcurrentHashMap<>();
     private final SharedAnalysis<CacheKey, DtoKnowledgeAnswer> inFlight = new SharedAnalysis<>();
-
-    public QuestionAnswerCache(
-        ProjectsKnowledgeProperties properties,
-        Clock clock,
-        PersistentKnowledgeCache persistentCache
-    ) {
-        this.properties = properties;
-        this.clock = clock;
-        this.persistentCache = persistentCache;
-    }
 
     public DtoKnowledgeAnswer resolveAnswer(
         Project project,

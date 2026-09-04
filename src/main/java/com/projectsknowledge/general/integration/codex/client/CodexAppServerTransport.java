@@ -1,5 +1,6 @@
 package com.projectsknowledge.general.integration.codex.client;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.ApiErrorCode;
@@ -59,6 +60,15 @@ public class CodexAppServerTransport implements AutoCloseable {
             if (candidate != null) candidate.close();
             throw exception;
         }
+    }
+
+    public JsonNode request(String method, Object params, Duration timeout) {
+        return connection().request(method, params, timeout);
+    }
+
+    public synchronized int activeTurns() {
+        CodexAppServerConnection current = connection;
+        return current == null ? 0 : current.activeTurns();
     }
 
     @PreDestroy

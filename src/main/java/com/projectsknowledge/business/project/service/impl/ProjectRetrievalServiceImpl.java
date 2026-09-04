@@ -44,17 +44,17 @@ public class ProjectRetrievalServiceImpl implements ProjectRetrievalService {
     @Override
     public Project requireProject(String projectId) {
         if ("all".equalsIgnoreCase(projectId)) {
-            Project all = new Project();
-            all.setId("all");
-            all.setName("All Projects");
-            all.setRepositories(
-                codexProjectCatalog
-                    .projects()
-                    .stream()
-                    .flatMap(p -> p.getRepositories().stream())
-                    .toList()
-            );
-            return all;
+            return Project.builder()
+                .id("all")
+                .name("All Projects")
+                .repositories(
+                    codexProjectCatalog
+                        .projects()
+                        .stream()
+                        .flatMap(project -> project.getRepositories().stream())
+                        .toList()
+                )
+                .build();
         }
         return codexProjectCatalog
             .projects()

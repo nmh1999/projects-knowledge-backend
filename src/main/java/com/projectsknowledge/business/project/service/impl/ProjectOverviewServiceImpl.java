@@ -27,12 +27,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 /** One evidence-based overview per project snapshot, shared until its configured expiry. */
 @Service
+@RequiredArgsConstructor
 public class ProjectOverviewServiceImpl implements ProjectOverviewService, CacheClearable {
 
     private static final String OVERVIEW_NAMESPACE = "overview-v2";
@@ -45,30 +46,6 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
     private final Map<CacheKey, CacheEntry> cache = new LinkedHashMap<>(16, .75f, true);
     private final SharedAnalysis<CacheKey, DtoProject> inFlight = new SharedAnalysis<>();
     private long cacheGeneration;
-
-    @Autowired
-    public ProjectOverviewServiceImpl(
-        CodexAppServerClient client,
-        RepositoryScanner scanner,
-        ProjectsKnowledgeProperties properties,
-        Clock clock,
-        PersistentKnowledgeCache persistentCache
-    ) {
-        this.client = client;
-        this.scanner = scanner;
-        this.properties = properties;
-        this.clock = clock;
-        this.persistentCache = persistentCache;
-    }
-
-    ProjectOverviewServiceImpl(
-        CodexAppServerClient client,
-        RepositoryScanner scanner,
-        ProjectsKnowledgeProperties properties,
-        Clock clock
-    ) {
-        this(client, scanner, properties, clock, PersistentKnowledgeCache.disabled());
-    }
 
     @Override
     public DtoProject get(Project project) {
@@ -126,13 +103,13 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
 
     private DtoProject build(Project project) {
         List<Repository> repositories = project.getRepositories();
-        if (repositories.isEmpty()) return new DtoProject(
-            project.getId(),
-            project.getName(),
-            List.of(),
-            new DtoProjectOverview(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of()),
-            clock.instant()
-        );
+        if (repositories.isEmpty()) return DtoProject.builder()
+            .id(project.getId())
+            .name(project.getName())
+            .repositories(List.of())
+            .overview(DtoProjectOverview.empty())
+            .overviewUpdatedAt(clock.instant())
+            .build();
         if (repositories.stream().anyMatch(repo -> !Files.isDirectory(repo.getPath()))) {
             throw new KnowledgeException(
                 HttpStatus.SERVICE_UNAVAILABLE,
@@ -148,15 +125,15 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
                 RequestCancellation.check();
                 scanner.invalidateFiles(repo);
                 var metadata = scanner.metadata(repo);
-                return new DtoRepository(
-                    repo.getId(),
-                    repo.getName(),
-                    repo.getType().name(),
-                    metadata.available(),
-                    metadata.languages(),
-                    metadata.frameworks(),
-                    metadata.buildTools()
-                );
+                return DtoRepository.builder()
+                    .id(repo.getId())
+                    .name(repo.getName())
+                    .type(repo.getType().name())
+                    .available(metadata.available())
+                    .languages(metadata.languages())
+                    .frameworks(metadata.frameworks())
+                    .buildTools(metadata.buildTools())
+                    .build();
             })
             .toList();
         List<String> integrations = result
@@ -165,21 +142,23 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
             .filter(value -> hasEvidence(repositories, value))
             .map(DtoCodexProjectOverview.IntegrationEvidence::name)
             .toList();
-        return new DtoProject(
-            project.getId(),
-            project.getName(),
-            repositoryDtos,
-            new DtoProjectOverview(
-                names(result.frontend()),
-                names(result.backend()),
-                names(result.databases()),
-                names(result.domains()),
-                names(integrations),
-                names(result.messaging()),
-                names(result.scheduledJobs())
-            ),
-            clock.instant()
-        );
+        return DtoProject.builder()
+            .id(project.getId())
+            .name(project.getName())
+            .repositories(repositoryDtos)
+            .overview(
+                DtoProjectOverview.builder()
+                    .frontend(names(result.frontend()))
+                    .backend(names(result.backend()))
+                    .databases(names(result.databases()))
+                    .domains(names(result.domains()))
+                    .integrations(names(integrations))
+                    .messaging(names(result.messaging()))
+                    .scheduledJobs(names(result.scheduledJobs()))
+                    .build()
+            )
+            .overviewUpdatedAt(clock.instant())
+            .build();
     }
 
     private boolean hasEvidence(List<Repository> repositories, DtoCodexProjectOverview.IntegrationEvidence evidence) {

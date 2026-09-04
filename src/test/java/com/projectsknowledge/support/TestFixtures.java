@@ -19,20 +19,11 @@ public final class TestFixtures {
     }
 
     public static Project project(String id, String name, List<Repository> repositories) {
-        Project project = new Project();
-        project.setId(id);
-        project.setName(name);
-        project.setRepositories(repositories);
-        return project;
+        return Project.builder().id(id).name(name).repositories(repositories).build();
     }
 
     public static Repository repository(String id, String name, Path path, RepositoryType type) {
-        Repository repository = new Repository();
-        repository.setId(id);
-        repository.setName(name);
-        repository.setPath(path);
-        repository.setType(type);
-        return repository;
+        return Repository.builder().id(id).name(name).path(path).type(type).build();
     }
 
     public static Repository backendRepository(String id, Path path) {

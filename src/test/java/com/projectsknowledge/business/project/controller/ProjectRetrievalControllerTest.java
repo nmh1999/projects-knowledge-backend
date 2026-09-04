@@ -35,7 +35,7 @@ class ProjectRetrievalControllerTest {
             "dynamic",
             "Runtime project",
             List.of(),
-            new DtoProjectOverview(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of()),
+            DtoProjectOverview.empty(),
             Instant.parse("2026-01-01T10:30:00Z")
         );
         when(service.findById("dynamic")).thenReturn(snapshot);

@@ -1,4 +1,4 @@
-package com.projectsknowledge.general.integration.codex.client;
+package com.projectsknowledge.general.integration.codex.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.projectsknowledge.general.cache.CacheClearable;
@@ -7,6 +7,7 @@ import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
+import com.projectsknowledge.general.integration.codex.client.CodexAppServerTransport;
 import com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexModel;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexReasoningEffort;
@@ -36,7 +37,7 @@ public class CodexModelService implements CacheClearable {
     private final Clock clock;
     private final PersistentKnowledgeCache persistentCache;
     private final Object cacheMonitor = new Object();
-    private volatile CodexModelCatalogSnapshot cache;
+    private volatile ModelCatalogSnapshot cache;
 
     @Override
     public void clearCache() {
@@ -52,8 +53,7 @@ public class CodexModelService implements CacheClearable {
             return DtoCodexStatus.disabled(selected.model(), selected.reasoningEffort());
         }
         try {
-            CodexAppServerConnection connection = transport.connection();
-            return buildStatus(connection, readAccount(connection), selected.model(), selected.reasoningEffort());
+            return buildStatus(readAccount(), selected.model(), selected.reasoningEffort());
         } catch (KnowledgeException exception) {
             return DtoCodexStatus.unavailable(selected.model(), selected.reasoningEffort());
         }
@@ -69,8 +69,7 @@ public class CodexModelService implements CacheClearable {
             );
         }
         try {
-            CodexAppServerConnection connection = transport.connection();
-            return buildSettings(connection, readAccount(connection), models(connection), selected);
+            return buildSettings(readAccount(), models(), selected);
         } catch (KnowledgeException exception) {
             return DtoCodexSettings.unavailable(
                 DtoCodexStatus.unavailable(selected.model(), selected.reasoningEffort()),
@@ -86,9 +85,8 @@ public class CodexModelService implements CacheClearable {
             "Codex is disabled.",
             true
         );
-        CodexAppServerConnection connection = transport.connection();
-        JsonNode account = readAccount(connection);
-        List<DtoCodexModel> models = models(connection);
+        JsonNode account = readAccount();
+        List<DtoCodexModel> models = models();
         DtoCodexModel selectedModel = findModel(models, request.model());
         if (selectedModel == null) throw new KnowledgeException(HttpStatus.BAD_REQUEST, "The selected model is unavailable.");
         String effort = request.reasoningEffort().strip().toLowerCase(java.util.Locale.ROOT);
@@ -98,33 +96,33 @@ public class CodexModelService implements CacheClearable {
             "The selected reasoning effort is not supported by this model."
         );
         var saved = runtimeSettings.update(request.model(), effort);
-        return buildSettings(connection, account, models, saved);
+        return buildSettings(account, models, saved);
     }
 
-    private JsonNode readAccount(CodexAppServerConnection connection) {
-        return connection.request("account/read", Map.of("refreshToken", false), setupTimeout());
+    private JsonNode readAccount() {
+        return transport.request("account/read", Map.of("refreshToken", false), setupTimeout());
     }
 
-    private List<DtoCodexModel> models(CodexAppServerConnection connection) {
+    private List<DtoCodexModel> models() {
         int ttlSeconds = Math.max(0, properties.getCodex().getModelCacheSeconds());
-        if (ttlSeconds == 0) return loadModels(connection);
+        if (ttlSeconds == 0) return loadModels();
         Instant now = clock.instant();
-        CodexModelCatalogSnapshot observed = cache;
+        ModelCatalogSnapshot observed = cache;
         if (isFresh(observed, now, ttlSeconds)) return observed.models();
         synchronized (cacheMonitor) {
             now = clock.instant();
             if (isFresh(cache, now, ttlSeconds)) return cache.models();
-            CodexModelCatalogSnapshot persisted = persistentCache
-                .find(MODEL_CACHE_NAMESPACE, MODEL_CACHE_KEY, CodexModelCatalogSnapshot.class, now)
+            ModelCatalogSnapshot persisted = persistentCache
+                .find(MODEL_CACHE_NAMESPACE, MODEL_CACHE_KEY, ModelCatalogSnapshot.class, now)
                 .orElse(null);
             if (isFresh(persisted, now, ttlSeconds)) {
                 cache = persisted;
                 return persisted.models();
             }
-            List<DtoCodexModel> loaded = loadModels(connection);
+            List<DtoCodexModel> loaded = loadModels();
             // A transient empty response must not hide the model catalog for five hours.
             if (loaded.isEmpty()) return loaded;
-            CodexModelCatalogSnapshot snapshot = new CodexModelCatalogSnapshot(now, loaded);
+            ModelCatalogSnapshot snapshot = new ModelCatalogSnapshot(now, loaded);
             persistentCache.put(
                 MODEL_CACHE_NAMESPACE,
                 MODEL_CACHE_KEY,
@@ -138,8 +136,8 @@ public class CodexModelService implements CacheClearable {
         }
     }
 
-    private List<DtoCodexModel> loadModels(CodexAppServerConnection connection) {
-        JsonNode response = connection.request(
+    private List<DtoCodexModel> loadModels() {
+        JsonNode response = transport.request(
             "model/list",
             Map.of("limit", 100, "includeHidden", false),
             setupTimeout()
@@ -174,19 +172,17 @@ public class CodexModelService implements CacheClearable {
     }
 
     private DtoCodexSettings buildSettings(
-        CodexAppServerConnection connection,
         JsonNode account,
         List<DtoCodexModel> models,
         CodexRuntimeSettings.Selection selected
     ) {
         DtoCodexModel effective = findModel(models, selected.model());
         String effectiveModel = effective == null ? selected.model() : effective.id();
-        DtoCodexStatus status = buildStatus(connection, account, effectiveModel, selected.reasoningEffort());
+        DtoCodexStatus status = buildStatus(account, effectiveModel, selected.reasoningEffort());
         return new DtoCodexSettings(status, selected.model(), models);
     }
 
     private DtoCodexStatus buildStatus(
-        CodexAppServerConnection connection,
         JsonNode account,
         String model,
         String reasoningEffort
@@ -201,7 +197,7 @@ public class CodexModelService implements CacheClearable {
             authenticated ? accountDetails.path("type").asText("") : "",
             model,
             reasoningEffort,
-            connection.activeTurns()
+            transport.activeTurns()
         );
     }
 
@@ -212,7 +208,7 @@ public class CodexModelService implements CacheClearable {
         return models.stream().filter(model -> model.id().equals(selectedModel.strip())).findFirst().orElse(null);
     }
 
-    private boolean isFresh(CodexModelCatalogSnapshot snapshot, Instant now, int ttlSeconds) {
+    private boolean isFresh(ModelCatalogSnapshot snapshot, Instant now, int ttlSeconds) {
         return snapshot != null &&
             snapshot.cachedAt() != null &&
             !snapshot.cachedAt().isAfter(now) &&
@@ -221,5 +217,11 @@ public class CodexModelService implements CacheClearable {
 
     private Duration setupTimeout() {
         return Duration.ofSeconds(Math.max(1, Math.min(30, properties.getCodex().getTimeoutSeconds())));
+    }
+
+    private record ModelCatalogSnapshot(Instant cachedAt, List<DtoCodexModel> models) {
+        private ModelCatalogSnapshot {
+            models = models == null ? List.of() : List.copyOf(models);
+        }
     }
 }

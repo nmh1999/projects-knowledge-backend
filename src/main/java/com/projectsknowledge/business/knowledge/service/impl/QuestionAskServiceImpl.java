@@ -22,11 +22,12 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /** Orchestrates Codex questions and validates the source evidence returned with each answer. */
 @Service
+@RequiredArgsConstructor
 public class QuestionAskServiceImpl implements QuestionAskService {
 
     private static final String OUT_OF_SCOPE_EN =
@@ -38,19 +39,6 @@ public class QuestionAskServiceImpl implements QuestionAskService {
     private final CodexAppServerClient codexClient;
     private final QuestionAnswerCache answerCache;
     private final RepositoryScanner scanner;
-
-    @Autowired
-    public QuestionAskServiceImpl(
-        ProjectRetrievalService projectService,
-        CodexAppServerClient codexClient,
-        QuestionAnswerCache answerCache,
-        RepositoryScanner scanner
-    ) {
-        this.projectService = projectService;
-        this.codexClient = codexClient;
-        this.answerCache = answerCache;
-        this.scanner = scanner;
-    }
 
     @Override
     public DtoKnowledgeAnswer ask(ReqQuestion request) {

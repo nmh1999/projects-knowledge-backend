@@ -12,4 +12,8 @@ public record DtoProjectOverview(
     List<String> integrations,
     List<String> messaging,
     List<String> scheduledJobs
-) {}
+) {
+    public static DtoProjectOverview empty() {
+        return new DtoProjectOverview(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+    }
+}

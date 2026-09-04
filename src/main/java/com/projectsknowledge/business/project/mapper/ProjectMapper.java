@@ -33,9 +33,7 @@ public final class ProjectMapper {
             .id(project.getId())
             .name(project.getName())
             .repositories(repositories)
-            .overview(
-                new DtoProjectOverview(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of())
-            )
+            .overview(DtoProjectOverview.empty())
             .build();
     }
 }

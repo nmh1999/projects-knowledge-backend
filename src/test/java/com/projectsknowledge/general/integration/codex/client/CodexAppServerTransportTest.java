@@ -11,6 +11,7 @@ import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
+import com.projectsknowledge.general.integration.codex.service.CodexModelService;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -25,9 +26,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 @Timeout(15)
 class CodexAppServerTransportTest {
+
+    @TempDir
+    Path cacheRoot;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final ProjectsKnowledgeProperties properties = new ProjectsKnowledgeProperties();
@@ -138,6 +143,23 @@ class CodexAppServerTransportTest {
         models.settings();
 
         assertThat(first.requests("model/list")).hasSize(2);
+    }
+
+    @Test
+    void restoresTheModelCatalogFromPersistentCacheAfterMemoryCacheIsCleared() {
+        var persistent = new PersistentKnowledgeCache(
+            new ObjectMapper().findAndRegisterModules(),
+            cacheRoot.resolve("models.db"),
+            true
+        );
+        persistent.initialize();
+        var cachedModels = new CodexModelService(properties, runtimeSettings, transport, clock, persistent);
+
+        cachedModels.settings();
+        cachedModels.clearCache();
+        cachedModels.settings();
+
+        assertThat(first.requests("model/list")).hasSize(1);
     }
 
     @Test
