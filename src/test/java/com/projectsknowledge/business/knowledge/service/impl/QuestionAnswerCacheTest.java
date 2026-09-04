@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.Mockito.*;
 
+import com.projectsknowledge.business.knowledge.cache.QuestionAnswerCache;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.business.knowledge.schema.request.ReqIntegrationDetails;
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
@@ -16,6 +17,7 @@ import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
+import com.projectsknowledge.general.scanner.RepositoryScanner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -59,7 +61,7 @@ class QuestionAnswerCacheTest {
         when(client.ask(anyList(), anyString(), anyString(), any())).thenReturn(
             new DtoBasicKnowledgeResult("Answer", "high", true).toKnowledgeResult()
         );
-        service = new QuestionAskServiceImpl(projects, client, properties, clock);
+        service = service(PersistentKnowledgeCache.disabled());
     }
 
     @ParameterizedTest
@@ -146,7 +148,7 @@ class QuestionAnswerCacheTest {
             true
         );
         persistent.initialize();
-        var firstService = new QuestionAskServiceImpl(projects, client, properties, clock, persistent);
+        var firstService = service(persistent);
         var first = firstService.ask(question);
 
         var restartedCache = new PersistentKnowledgeCache(
@@ -155,13 +157,7 @@ class QuestionAnswerCacheTest {
             true
         );
         restartedCache.initialize();
-        var restartedService = new QuestionAskServiceImpl(
-            projects,
-            client,
-            properties,
-            clock,
-            restartedCache
-        );
+        var restartedService = service(restartedCache);
         var restored = restartedService.ask(question);
 
         assertThat(restored).isEqualTo(first).isNotSameAs(first);
@@ -177,13 +173,7 @@ class QuestionAnswerCacheTest {
             true
         );
         persistent.initialize();
-        var firstService = new QuestionAskServiceImpl(
-            projects,
-            client,
-            properties,
-            clock,
-            persistent
-        );
+        var firstService = service(persistent);
         var request = new ReqIntegrationDetails("sample", "Orbit", "en");
         var first = firstService.explainIntegration(request);
 
@@ -193,13 +183,7 @@ class QuestionAnswerCacheTest {
             true
         );
         restartedCache.initialize();
-        var restartedService = new QuestionAskServiceImpl(
-            projects,
-            client,
-            properties,
-            clock,
-            restartedCache
-        );
+        var restartedService = service(restartedCache);
 
         assertThat(restartedService.explainIntegration(request)).isEqualTo(first).isNotSameAs(first);
         verify(client, times(1)).ask(anyList(), anyString(), anyString(), any());
@@ -266,5 +250,14 @@ class QuestionAnswerCacheTest {
         }
         assertThat(second.get(5, TimeUnit.SECONDS)).isSameAs(first.get(5, TimeUnit.SECONDS));
         verify(client, times(2)).ask(anyList(), anyString(), anyString(), any());
+    }
+
+    private QuestionAskServiceImpl service(PersistentKnowledgeCache persistentCache) {
+        return new QuestionAskServiceImpl(
+            projects,
+            client,
+            new QuestionAnswerCache(properties, clock, persistentCache),
+            new RepositoryScanner(properties)
+        );
     }
 }

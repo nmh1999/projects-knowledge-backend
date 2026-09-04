@@ -3,6 +3,7 @@ package com.projectsknowledge.business.knowledge.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.projectsknowledge.business.knowledge.cache.QuestionAnswerCache;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.business.knowledge.schema.request.ReqIntegrationDetails;
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
@@ -14,11 +15,13 @@ import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.enums.RepositoryType;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
 import com.projectsknowledge.business.project.service.impl.ProjectRetrievalServiceImpl;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoWorkflowKnowledgeResult;
+import com.projectsknowledge.general.scanner.RepositoryScanner;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -56,7 +59,7 @@ class QuestionAskServiceTest {
         );
         ProjectRetrievalService projects = new StubProjectService(project);
         StubCodexClient codex = new StubCodexClient(result, properties);
-        QuestionAskService service = new QuestionAskServiceImpl(projects, codex, properties, Clock.systemUTC());
+        QuestionAskService service = service(projects, codex, properties);
 
         service.ask(new ReqQuestion("project", "Which framework?", "en"));
         java.nio.file.Files.writeString(root.resolve("changed-after-cache.ts"), "export const changed = true;");
@@ -89,12 +92,7 @@ class QuestionAskServiceTest {
             true
         );
         StubCodexClient codex = new StubCodexClient(result, properties);
-        QuestionAskService service = new QuestionAskServiceImpl(
-            new StubProjectService(project),
-            codex,
-            properties,
-            Clock.systemUTC()
-        );
+        QuestionAskService service = service(new StubProjectService(project), codex, properties);
 
         service.explainIntegration(new ReqIntegrationDetails("project", "Example Billing", "en"));
         service.explainIntegration(new ReqIntegrationDetails("project", " example billing ", "en"));
@@ -114,12 +112,7 @@ class QuestionAskServiceTest {
                 true
             ).toKnowledgeResult();
         StubCodexClient codex = new StubCodexClient(result, properties);
-        QuestionAskService service = new QuestionAskServiceImpl(
-            new StubProjectService(project()),
-            codex,
-            properties,
-            Clock.systemUTC()
-        );
+        QuestionAskService service = service(new StubProjectService(project()), codex, properties);
 
         for (int repeat = 0; repeat < 2; repeat++) {
             service.ask(new ReqQuestion("project", "Which framework?", "en", SearchMode.BASIC));
@@ -187,12 +180,7 @@ class QuestionAskServiceTest {
             true
         ).toKnowledgeResult();
         var codex = new StubCodexClient(result, properties);
-        var service = new QuestionAskServiceImpl(
-            new StubProjectService(project()),
-            codex,
-            properties,
-            Clock.systemUTC()
-        );
+        var service = service(new StubProjectService(project()), codex, properties);
         var question = new ReqQuestion("project", "Explain order tables", "ar", SearchMode.DATABASE);
         var answer = service.ask(question);
         assertThat(answer.database()).containsExactly(table);
@@ -241,11 +229,10 @@ class QuestionAskServiceTest {
             graph,
             true
         ).toKnowledgeResult();
-        var service = new QuestionAskServiceImpl(
+        var service = service(
             new StubProjectService(project()),
             new StubCodexClient(result, properties),
-            properties,
-            Clock.systemUTC()
+            properties
         );
         var answer = service.ask(new ReqQuestion("project", "How does review work?", "en", SearchMode.WORKFLOW));
         assertThat(answer.roles()).containsExactly(role);
@@ -288,12 +275,7 @@ class QuestionAskServiceTest {
             DtoCodexKnowledgeResult.class
         );
         var codex = new StubCodexClient(result, properties);
-        var service = new QuestionAskServiceImpl(
-            new StubProjectService(project()),
-            codex,
-            properties,
-            Clock.systemUTC()
-        );
+        var service = service(new StubProjectService(project()), codex, properties);
         for (SearchMode mode : SearchMode.values())
             for (String language : List.of("ar", "en")) {
                 var question = new ReqQuestion("project", "What is the capital of France?", language, mode);
@@ -325,16 +307,28 @@ class QuestionAskServiceTest {
             "low",
             true
         ).toKnowledgeResult();
-        var service = new QuestionAskServiceImpl(
+        var service = service(
             new StubProjectService(project()),
             new StubCodexClient(result, properties),
-            properties,
-            Clock.systemUTC()
+            properties
         );
         var answer = service.ask(new ReqQuestion("project", "Who approves requests?", "en", SearchMode.BASIC));
         assertThat(answer.inScope()).isTrue();
         assertThat(answer.enoughEvidence()).isFalse();
         assertThat(answer.summary()).isEqualTo(result.answer());
+    }
+
+    private static QuestionAskServiceImpl service(
+        ProjectRetrievalService projects,
+        CodexAppServerClient codex,
+        ProjectsKnowledgeProperties properties
+    ) {
+        return new QuestionAskServiceImpl(
+            projects,
+            codex,
+            new QuestionAnswerCache(properties, Clock.systemUTC(), PersistentKnowledgeCache.disabled()),
+            new RepositoryScanner(properties)
+        );
     }
 
     private static final class StubProjectService extends ProjectRetrievalServiceImpl {
