@@ -1,13 +1,13 @@
 package com.projectsknowledge.business.project.service.impl;
 
+import static com.projectsknowledge.support.TestFixtures.backendRepository;
+import static com.projectsknowledge.support.TestFixtures.project;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.projectsknowledge.business.project.catalog.CodexProjectCatalog;
-import com.projectsknowledge.business.project.entity.Project;
 import com.projectsknowledge.business.project.service.ProjectOverviewService;
 import com.projectsknowledge.general.exception.KnowledgeException;
-import com.projectsknowledge.general.scanner.RepositoryScannerTest;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -21,11 +21,8 @@ class ProjectRetrievalServiceTest {
 
     @Test
     void allEndpointsUseOnlyTheCurrentCatalogAndDoNotRetainRemovedProjects() {
-        var repository = RepositoryScannerTest.repository("dynamic-repository", root);
-        var project = new Project();
-        project.setId("dynamic-project");
-        project.setName("Runtime name");
-        project.setRepositories(List.of(repository));
+        var repository = backendRepository("dynamic-repository", root);
+        var project = project("dynamic-project", "Runtime name", repository);
         var catalog = mock(CodexProjectCatalog.class);
         when(catalog.projects()).thenReturn(List.of(project));
         var overviews = mock(ProjectOverviewService.class);
@@ -68,10 +65,7 @@ class ProjectRetrievalServiceTest {
     void refreshingTheCatalogNeverStartsOverviewAnalysis() {
         var catalog = mock(CodexProjectCatalog.class);
         var overviews = mock(ProjectOverviewService.class);
-        var project = new Project();
-        project.setId("fresh");
-        project.setName("New project");
-        project.setRepositories(List.of());
+        var project = project("fresh", "New project");
         when(catalog.refresh()).thenReturn(List.of(project));
         var service = new ProjectRetrievalServiceImpl(overviews, catalog);
         assertThat(service.refreshProjects()).extracting(value -> value.id()).containsExactly("fresh");

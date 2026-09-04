@@ -1,5 +1,7 @@
 package com.projectsknowledge.business.source.service.impl;
 
+import static com.projectsknowledge.support.TestFixtures.backendRepository;
+import static com.projectsknowledge.support.TestFixtures.project;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -15,7 +17,6 @@ import com.projectsknowledge.business.source.service.SourceRetrievalService;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.scanner.RepositoryScanner;
-import com.projectsknowledge.general.scanner.RepositoryScannerTest;
 import com.projectsknowledge.general.security.SecretRedactionService;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,11 +33,8 @@ class SourceRetrievalServiceTest {
     void returnsValidRedactedLineRanges() throws Exception {
         Files.writeString(root.resolve("application.properties"), "name=demo\npayment.api-key=ABC123\ntimeout=30\n");
         ProjectsKnowledgeProperties properties = new ProjectsKnowledgeProperties();
-        Repository repository = RepositoryScannerTest.repository("repo", root);
-        Project project = new Project();
-        project.setId("project");
-        project.setName("Project");
-        project.setRepositories(List.of(repository));
+        Repository repository = backendRepository("repo", root);
+        Project project = project("project", "Project", repository);
         CodexProjectCatalog catalog = mock(CodexProjectCatalog.class);
         when(catalog.projects()).thenReturn(List.of(project));
         SecretRedactionService redaction = new SecretRedactionService();

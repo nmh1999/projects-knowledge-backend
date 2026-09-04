@@ -1,5 +1,7 @@
 package com.projectsknowledge.business.knowledge.service.impl;
 
+import static com.projectsknowledge.support.TestFixtures.project;
+import static com.projectsknowledge.support.TestFixtures.repository;
 import static org.assertj.core.api.Assertions.*;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.Mockito.*;
@@ -9,7 +11,6 @@ import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.business.knowledge.schema.request.ReqIntegrationDetails;
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
 import com.projectsknowledge.business.project.entity.Project;
-import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.RequestCancelledException;
@@ -44,18 +45,15 @@ class QuestionAnswerCacheTest {
     private final Clock clock = mock(Clock.class);
     private final Instant start = Instant.parse("2026-08-28T10:00:00Z");
     private final ReqQuestion question = new ReqQuestion("sample", "Explain approvals", "en", SearchMode.BASIC);
-    private final Project project = new Project();
+    private final Project project = project(
+        "sample",
+        "Sample",
+        repository("repo", "Repository", Path.of("runtime-project"), null)
+    );
     private QuestionAskServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        var repository = new Repository();
-        repository.setId("repo");
-        repository.setName("Repository");
-        repository.setPath(Path.of("runtime-project"));
-        project.setId("sample");
-        project.setName("Sample");
-        project.setRepositories(List.of(repository));
         when(projects.requireProject(anyString())).thenReturn(project);
         when(clock.instant()).thenReturn(start);
         when(client.ask(anyList(), anyString(), anyString(), any())).thenReturn(

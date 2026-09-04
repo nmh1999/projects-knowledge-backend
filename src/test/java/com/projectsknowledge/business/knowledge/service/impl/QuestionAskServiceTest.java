@@ -1,5 +1,8 @@
 package com.projectsknowledge.business.knowledge.service.impl;
 
+import static com.projectsknowledge.support.TestFixtures.codexAnswerBuilder;
+import static com.projectsknowledge.support.TestFixtures.project;
+import static com.projectsknowledge.support.TestFixtures.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,7 +14,6 @@ import com.projectsknowledge.business.knowledge.schema.response.DtoKnowledgeAnsw
 import com.projectsknowledge.business.knowledge.schema.response.DtoWorkflowDiagram;
 import com.projectsknowledge.business.knowledge.service.QuestionAskService;
 import com.projectsknowledge.business.project.entity.Project;
-import com.projectsknowledge.business.project.entity.Repository;
 import com.projectsknowledge.business.project.enums.RepositoryType;
 import com.projectsknowledge.business.project.service.ProjectRetrievalService;
 import com.projectsknowledge.business.project.service.impl.ProjectRetrievalServiceImpl;
@@ -38,26 +40,10 @@ class QuestionAskServiceTest {
     @Test
     void reusesCachedAnswerForEquivalentQuestionWithoutRescanningChangedFiles() throws Exception {
         ProjectsKnowledgeProperties properties = new ProjectsKnowledgeProperties();
-        Project project = project();
-        DtoCodexKnowledgeResult result = new DtoCodexKnowledgeResult(
-            "Angular is used.",
-            "high",
-            List.of("Angular"),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            "",
-            null,
-            true
-        );
+        Project project = selectedProject();
+        DtoCodexKnowledgeResult result = codexAnswerBuilder("Angular is used.")
+            .keyFindings(List.of("Angular"))
+            .build();
         ProjectRetrievalService projects = new StubProjectService(project);
         StubCodexClient codex = new StubCodexClient(result, properties);
         QuestionAskService service = service(projects, codex, properties);
@@ -70,28 +56,10 @@ class QuestionAskServiceTest {
     }
 
     @Test
-    void reusesFiveHourIntegrationAnswerCache() {
+    void reusesIntegrationAnswerCache() {
         ProjectsKnowledgeProperties properties = new ProjectsKnowledgeProperties();
-        Project project = project();
-        DtoCodexKnowledgeResult result = new DtoCodexKnowledgeResult(
-            "Integration details.",
-            "high",
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            "",
-            null,
-            true
-        );
+        Project project = selectedProject();
+        DtoCodexKnowledgeResult result = codexAnswerBuilder("Integration details.").build();
         StubCodexClient codex = new StubCodexClient(result, properties);
         QuestionAskService service = service(new StubProjectService(project), codex, properties);
 
@@ -113,7 +81,7 @@ class QuestionAskServiceTest {
                 true
             ).toKnowledgeResult();
         StubCodexClient codex = new StubCodexClient(result, properties);
-        QuestionAskService service = service(new StubProjectService(project()), codex, properties);
+        QuestionAskService service = service(new StubProjectService(selectedProject()), codex, properties);
 
         for (int repeat = 0; repeat < 2; repeat++) {
             service.ask(new ReqQuestion("project", "Which framework?", "en", SearchMode.BASIC));
@@ -181,7 +149,7 @@ class QuestionAskServiceTest {
             true
         ).toKnowledgeResult();
         var codex = new StubCodexClient(result, properties);
-        var service = service(new StubProjectService(project()), codex, properties);
+        var service = service(new StubProjectService(selectedProject()), codex, properties);
         var question = new ReqQuestion("project", "Explain order tables", "ar", SearchMode.DATABASE);
         var answer = service.ask(question);
         assertThat(answer.database()).containsExactly(table);
@@ -231,7 +199,7 @@ class QuestionAskServiceTest {
             true
         ).toKnowledgeResult();
         var service = service(
-            new StubProjectService(project()),
+            new StubProjectService(selectedProject()),
             new StubCodexClient(result, properties),
             properties
         );
@@ -243,17 +211,12 @@ class QuestionAskServiceTest {
         assertThat(answer.technicalFlow()).isEmpty();
     }
 
-    private Project project() {
-        Repository repository = new Repository();
-        repository.setId("repository");
-        repository.setName("Repository");
-        repository.setPath(root);
-        repository.setType(RepositoryType.FRONTEND);
-        Project project = new Project();
-        project.setId("project");
-        project.setName("Project");
-        project.setRepositories(List.of(repository));
-        return project;
+    private Project selectedProject() {
+        return project(
+            "project",
+            "Project",
+            repository("repository", "Repository", root, RepositoryType.FRONTEND)
+        );
     }
 
     @Test
@@ -276,7 +239,7 @@ class QuestionAskServiceTest {
             DtoCodexKnowledgeResult.class
         );
         var codex = new StubCodexClient(result, properties);
-        var service = service(new StubProjectService(project()), codex, properties);
+        var service = service(new StubProjectService(selectedProject()), codex, properties);
         for (SearchMode mode : SearchMode.values())
             for (String language : List.of("ar", "en")) {
                 var question = new ReqQuestion("project", "What is the capital of France?", language, mode);
@@ -309,7 +272,7 @@ class QuestionAskServiceTest {
             true
         ).toKnowledgeResult();
         var service = service(
-            new StubProjectService(project()),
+            new StubProjectService(selectedProject()),
             new StubCodexClient(result, properties),
             properties
         );

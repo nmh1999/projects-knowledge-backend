@@ -1,5 +1,8 @@
 package com.projectsknowledge.business.project.service.impl;
 
+import static com.projectsknowledge.support.TestFixtures.backendRepository;
+import static com.projectsknowledge.support.TestFixtures.project;
+import static com.projectsknowledge.support.TestFixtures.projectOverviewBuilder;
 import static org.assertj.core.api.Assertions.*;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -18,7 +21,6 @@ import com.projectsknowledge.general.integration.codex.client.CodexAppServerClie
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexProjectOverview;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexProjectOverview.IntegrationEvidence;
 import com.projectsknowledge.general.scanner.RepositoryScanner;
-import com.projectsknowledge.general.scanner.RepositoryScannerTest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -50,11 +52,8 @@ class ProjectOverviewServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         when(clock.instant()).thenReturn(start);
-        var repository = RepositoryScannerTest.repository("repo", root);
-        project = new Project();
-        project.setId("project");
-        project.setName("Runtime project");
-        project.setRepositories(List.of(repository));
+        var repository = backendRepository("repo", root);
+        project = project("project", "Runtime project", repository);
         Files.createDirectories(root.resolve("arbitrary/place"));
         Files.writeString(root.resolve("arbitrary/place/Remote.java"), "class Remote {}\n");
         service = new ProjectOverviewServiceImpl(client, new RepositoryScanner(properties), properties, clock);
@@ -64,15 +63,12 @@ class ProjectOverviewServiceTest {
     }
 
     private DtoCodexProjectOverview result(List<IntegrationEvidence> integrations) {
-        return new DtoCodexProjectOverview(
-            List.of(),
-            List.of(" Spring Boot "),
-            List.of("PostgreSQL"),
-            List.of("Orders"),
-            integrations,
-            List.of(),
-            List.of()
-        );
+        return projectOverviewBuilder()
+            .backend(List.of(" Spring Boot "))
+            .databases(List.of("PostgreSQL"))
+            .domains(List.of("Orders"))
+            .integrations(integrations)
+            .build();
     }
 
     @Test
@@ -222,7 +218,7 @@ class ProjectOverviewServiceTest {
     void invalidatesOnRepositoryChangeAndSeparatesProjectEntries() throws Exception {
         var first = service.get(project);
         Path secondRoot = Files.createDirectory(root.resolve("another"));
-        project.setRepositories(List.of(RepositoryScannerTest.repository("repo", secondRoot)));
+        project.setRepositories(List.of(backendRepository("repo", secondRoot)));
         assertThat(service.get(project)).isNotSameAs(first);
         project.setId("other-project");
         service.get(project);
@@ -276,10 +272,7 @@ class ProjectOverviewServiceTest {
             persistent
         );
         DtoProject cached = concurrentService.get(project);
-        Project slowProject = new Project();
-        slowProject.setId("slow");
-        slowProject.setName("Slow project");
-        slowProject.setRepositories(project.getRepositories());
+        Project slowProject = project("slow", "Slow project", project.getRepositories());
 
         var slowRequest = CompletableFuture.supplyAsync(() -> concurrentService.get(slowProject));
         assertThat(persistent.started.await(3, TimeUnit.SECONDS)).isTrue();
