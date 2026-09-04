@@ -145,6 +145,8 @@ class QuestionAskServiceTest {
     void passesDatabaseDetailsAndValidatedEvidenceToTheResponse() throws Exception {
         var properties = new ProjectsKnowledgeProperties();
         java.nio.file.Files.writeString(root.resolve("schema.sql"), "CREATE TABLE orders (id bigint PRIMARY KEY);");
+        java.nio.file.Files.createDirectories(root.resolve("target"));
+        java.nio.file.Files.writeString(root.resolve("target/generated.sql"), "SHOULD NOT BE EXPOSED");
         var table = new DtoKnowledgeAnswer.DatabaseInfo(
             "orders",
             "Order",
@@ -171,6 +173,13 @@ class QuestionAskServiceTest {
                     "Repository",
                     "invalid\u0000path.sql",
                     "invalid",
+                    1,
+                    1
+                ),
+                new DtoCodexKnowledgeResult.SourceEvidence(
+                    "Repository",
+                    "target/generated.sql",
+                    "ignored",
                     1,
                     1
                 )

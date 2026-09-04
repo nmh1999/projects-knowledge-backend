@@ -16,9 +16,10 @@ import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
 import com.projectsknowledge.general.cancellation.SharedAnalysis;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
+import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
-import java.nio.file.Files;
+import com.projectsknowledge.general.scanner.RepositoryScanner;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -48,6 +49,7 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
     private final ProjectsKnowledgeProperties properties;
     private final Clock clock;
     private final PersistentKnowledgeCache persistentCache;
+    private final RepositoryScanner scanner;
     // The cache avoids a second Codex turn for the same normalized question and is bounded by configuration.
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> answerCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<CacheKey, DtoKnowledgeAnswer> integrationCache = new ConcurrentHashMap<>();
@@ -59,13 +61,25 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
         CodexAppServerClient codexClient,
         ProjectsKnowledgeProperties properties,
         Clock clock,
-        PersistentKnowledgeCache persistentCache
+        PersistentKnowledgeCache persistentCache,
+        RepositoryScanner scanner
     ) {
         this.projectService = projectService;
         this.codexClient = codexClient;
         this.properties = properties;
         this.clock = clock;
         this.persistentCache = persistentCache;
+        this.scanner = scanner;
+    }
+
+    QuestionAskServiceImpl(
+        ProjectRetrievalService projectService,
+        CodexAppServerClient codexClient,
+        ProjectsKnowledgeProperties properties,
+        Clock clock,
+        PersistentKnowledgeCache persistentCache
+    ) {
+        this(projectService, codexClient, properties, clock, persistentCache, new RepositoryScanner(properties));
     }
 
     QuestionAskServiceImpl(
@@ -320,23 +334,27 @@ public class QuestionAskServiceImpl implements QuestionAskService, CacheClearabl
             .toList();
         for (Repository repository : repositories) {
             Path root = repository.getPath().toAbsolutePath().normalize();
-            Path file = requested.isAbsolute() ? requested.normalize() : root.resolve(requested).normalize();
-            if (!file.startsWith(root) || !Files.isRegularFile(file)) continue;
-            String relative = root.relativize(file).toString().replace('\\', '/');
-            int start = Math.max(1, source.startLine());
-            int end = Math.max(start, Math.min(source.endLine(), start + 200));
-            return Optional.of(
-                new SourceReference(
-                    repository.getId(),
-                    repository.getName(),
-                    relative,
-                    file.getFileName().toString(),
-                    source.symbol(),
-                    start,
-                    end,
-                    ""
-                )
-            );
+            Path candidate = requested.isAbsolute() ? requested.normalize() : root.resolve(requested).normalize();
+            try {
+                scanner.resolveSource(repository, source.filePath());
+                String relative = root.relativize(candidate).toString().replace('\\', '/');
+                int start = Math.max(1, source.startLine());
+                int end = Math.max(start, Math.min(source.endLine(), start + 200));
+                return Optional.of(
+                    new SourceReference(
+                        repository.getId(),
+                        repository.getName(),
+                        relative,
+                        candidate.getFileName().toString(),
+                        source.symbol(),
+                        start,
+                        end,
+                        ""
+                    )
+                );
+            } catch (KnowledgeException | InvalidPathException ignored) {
+                // Another selected repository may contain the same relative source path.
+            }
         }
         return Optional.empty();
     }
