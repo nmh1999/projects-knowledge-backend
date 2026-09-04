@@ -44,6 +44,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
     private final PersistentKnowledgeCache persistentCache;
     private final Map<CacheKey, CacheEntry> cache = new LinkedHashMap<>(16, .75f, true);
     private final SharedAnalysis<CacheKey, DtoProject> inFlight = new SharedAnalysis<>();
+    private long cacheGeneration;
 
     @Autowired
     public ProjectOverviewServiceImpl(
@@ -83,6 +84,7 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
     public void clearCache() {
         synchronized (cache) {
             cache.clear();
+            cacheGeneration++;
         }
     }
 
@@ -212,43 +214,60 @@ public class ProjectOverviewServiceImpl implements ProjectOverviewService, Cache
     }
 
     private DtoProject cached(CacheKey key) {
+        int ttlSeconds = properties.getCodex().getOverviewCacheSeconds();
+        int maxEntries = properties.getCodex().getOverviewCacheMaxEntries();
+        if (ttlSeconds <= 0 || maxEntries <= 0) return null;
+
+        long observedGeneration;
         synchronized (cache) {
-            if (
-                properties.getCodex().getOverviewCacheSeconds() <= 0 ||
-                properties.getCodex().getOverviewCacheMaxEntries() <= 0
-            ) return null;
-            prune();
+            prune(ttlSeconds);
             CacheEntry entry = cache.get(key);
             if (entry != null) return entry.project();
-            DtoProject persisted = persistentCache
-                .find(OVERVIEW_NAMESPACE, key.toString(), DtoProject.class, clock.instant())
-                .orElse(null);
-            if (persisted != null) cache.put(key, new CacheEntry(persisted.overviewUpdatedAt(), persisted));
+            observedGeneration = cacheGeneration;
+        }
+
+        // SQLite access stays outside the in-memory monitor so unrelated cached projects remain responsive.
+        DtoProject persisted = persistentCache
+            .find(OVERVIEW_NAMESPACE, key.toString(), DtoProject.class, clock.instant())
+            .orElse(null);
+        if (persisted == null) return null;
+
+        synchronized (cache) {
+            if (cacheGeneration != observedGeneration) return null;
+            prune(ttlSeconds);
+            CacheEntry current = cache.get(key);
+            if (current != null) return current.project();
+            rememberInMemory(key, persisted, maxEntries);
             return persisted;
         }
     }
 
     private void remember(CacheKey key, DtoProject project) {
+        int ttlSeconds = properties.getCodex().getOverviewCacheSeconds();
+        int maxEntries = properties.getCodex().getOverviewCacheMaxEntries();
+        if (ttlSeconds <= 0 || maxEntries <= 0) return;
         synchronized (cache) {
-            int maxEntries = properties.getCodex().getOverviewCacheMaxEntries();
-            if (properties.getCodex().getOverviewCacheSeconds() <= 0 || maxEntries <= 0) return;
-            prune();
+            prune(ttlSeconds);
             // Timestamp and TTL both start at successful completion, never on page reads or failed attempts.
-            cache.put(key, new CacheEntry(project.overviewUpdatedAt(), project));
-            while (cache.size() > maxEntries) cache.remove(cache.keySet().iterator().next());
-            persistentCache.put(
-                OVERVIEW_NAMESPACE,
-                key.toString(),
-                project,
-                project.overviewUpdatedAt(),
-                project.overviewUpdatedAt().plusSeconds(properties.getCodex().getOverviewCacheSeconds()),
-                maxEntries
-            );
+            rememberInMemory(key, project, maxEntries);
         }
+        persistentCache.put(
+            OVERVIEW_NAMESPACE,
+            key.toString(),
+            project,
+            project.overviewUpdatedAt(),
+            project.overviewUpdatedAt().plusSeconds(ttlSeconds),
+            maxEntries
+        );
     }
 
-    private void prune() {
-        Instant cutoff = clock.instant().minusSeconds(properties.getCodex().getOverviewCacheSeconds());
+    private void rememberInMemory(CacheKey key, DtoProject project, int maxEntries) {
+        cache.put(key, new CacheEntry(project.overviewUpdatedAt(), project));
+        while (cache.size() > maxEntries) cache.remove(cache.keySet().iterator().next());
+    }
+
+    private void prune(int ttlSeconds) {
+        Instant cutoff = clock.instant().minusSeconds(ttlSeconds);
         cache.entrySet().removeIf(entry -> !entry.getValue().loadedAt().isAfter(cutoff));
     }
 

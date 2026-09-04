@@ -25,6 +25,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -265,6 +266,33 @@ class ProjectOverviewServiceTest {
     }
 
     @Test
+    void persistentCacheLookupDoesNotBlockAnUnrelatedMemoryHit() throws Exception {
+        var persistent = new BlockingPersistentCache(root.resolve("blocked-cache.db"));
+        var concurrentService = new ProjectOverviewServiceImpl(
+            client,
+            new RepositoryScanner(properties),
+            properties,
+            clock,
+            persistent
+        );
+        DtoProject cached = concurrentService.get(project);
+        Project slowProject = new Project();
+        slowProject.setId("slow");
+        slowProject.setName("Slow project");
+        slowProject.setRepositories(project.getRepositories());
+
+        var slowRequest = CompletableFuture.supplyAsync(() -> concurrentService.get(slowProject));
+        assertThat(persistent.started.await(3, TimeUnit.SECONDS)).isTrue();
+        try {
+            var memoryHit = CompletableFuture.supplyAsync(() -> concurrentService.get(project));
+            assertThat(memoryHit.get(1, TimeUnit.SECONDS)).isSameAs(cached);
+        } finally {
+            persistent.release.countDown();
+        }
+        assertThat(slowRequest.get(5, TimeUnit.SECONDS).id()).isEqualTo("slow");
+    }
+
+    @Test
     void emptyProjectNeverStartsAnalysis() {
         project.setRepositories(List.of());
         assertThat(service.get(project).overview().integrations()).isEmpty();
@@ -309,5 +337,29 @@ class ProjectOverviewServiceTest {
             }
         }
         verify(client, times(2)).overview(anyList());
+    }
+
+    private static final class BlockingPersistentCache extends PersistentKnowledgeCache {
+
+        private final CountDownLatch started = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        private BlockingPersistentCache(Path path) {
+            super(null, path, false);
+        }
+
+        @Override
+        public <T> Optional<T> find(String namespace, String key, Class<T> type, Instant now) {
+            if (key.contains("projectId=slow")) {
+                started.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Test timed out");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Test interrupted", exception);
+                }
+            }
+            return Optional.empty();
+        }
     }
 }
