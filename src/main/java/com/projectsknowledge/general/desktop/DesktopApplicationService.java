@@ -49,7 +49,7 @@ public class DesktopApplicationService {
     private URI applicationUri() {
         int port = ((WebServerApplicationContext) context).getWebServer().getPort();
         try {
-            return new URI("http", null, "127.0.0.1", port, "/", "desktop=true", null);
+            return new URI("http", null, "127.0.0.1", port, "/", null, null);
         } catch (URISyntaxException impossible) {
             throw new IllegalStateException("Could not create the local application URL.", impossible);
         }

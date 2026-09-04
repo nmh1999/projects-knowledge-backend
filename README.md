@@ -55,7 +55,7 @@ Outputs are written to the ignored `release` directory:
 
 After a successful build, the portable ZIP is also copied to the current user's Desktop and replaces the previous file with the same version. Pass `-SkipDesktopCopy` when that extra copy is not wanted.
 
-The desktop launcher opens `http://127.0.0.1:8090/?desktop=true`. Use **Close app** in the header to stop the local server, or **Clear cache** to delete every in-memory and persistent cache; both actions require confirmation and are accepted only from the loopback interface. A **Projects Knowledge** tray icon with Open and Exit actions is also added when Windows exposes system-tray support. Codex is deliberately not bundled: each user must install Codex, sign in with their own account, and keep the repositories they want to query on their computer. The default server address is loopback-only.
+The desktop launcher opens `http://127.0.0.1:8090/`. Use **Close app** in the header to stop the local server, or **Clear cache** to delete every in-memory and persistent cache; both actions require confirmation and are accepted only from the loopback interface. A **Projects Knowledge** tray icon with Open and Exit actions is also added when Windows exposes system-tray support. Codex is deliberately not bundled: each user must install Codex, sign in with their own account, and keep the repositories they want to query on their computer. The default server address is loopback-only.
 
 ## Configuration
 

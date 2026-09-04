@@ -28,7 +28,7 @@ public final class DesktopInstanceCoordinator {
         if (!booleanOption(args, DESKTOP_OPTION, false)) return true;
 
         URI applicationUri =
-            URI.create("http://127.0.0.1:" + integerOption(args, PORT_OPTION, DEFAULT_PORT) + "/?desktop=true");
+            URI.create("http://127.0.0.1:" + integerOption(args, PORT_OPTION, DEFAULT_PORT) + "/");
         try {
             Path lockFile = Path.of(System.getProperty("user.home"), ".projects-knowledge", "desktop.lock");
             Files.createDirectories(lockFile.getParent());
