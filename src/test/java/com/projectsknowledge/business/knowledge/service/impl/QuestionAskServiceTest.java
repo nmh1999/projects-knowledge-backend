@@ -18,6 +18,7 @@ import com.projectsknowledge.business.project.service.impl.ProjectRetrievalServi
 import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
+import com.projectsknowledge.general.integration.codex.client.CodexResponseParser;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoBasicKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoWorkflowKnowledgeResult;
@@ -353,13 +354,20 @@ class QuestionAskServiceTest {
         private final List<SearchMode> modes = new ArrayList<>();
 
         private StubCodexClient(DtoCodexKnowledgeResult result, ProjectsKnowledgeProperties properties) {
+            this(result, properties, new ObjectMapper());
+        }
+
+        private StubCodexClient(
+            DtoCodexKnowledgeResult result,
+            ProjectsKnowledgeProperties properties,
+            ObjectMapper mapper
+        ) {
             super(
-                new ObjectMapper(),
+                mapper,
                 properties,
                 null,
                 null,
-                java.time.Clock.systemUTC(),
-                com.projectsknowledge.general.cache.PersistentKnowledgeCache.disabled()
+                new CodexResponseParser(mapper)
             );
             this.result = result;
         }

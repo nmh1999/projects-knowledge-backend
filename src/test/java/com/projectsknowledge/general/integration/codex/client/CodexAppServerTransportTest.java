@@ -37,8 +37,15 @@ class CodexAppServerTransportTest {
     private final CodexAppServerTransport transport = new CodexAppServerTransport(mapper, properties, processes);
     private final CodexRuntimeSettings runtimeSettings = mock(CodexRuntimeSettings.class);
     private final Clock clock = mock(Clock.class);
+    private final CodexResponseParser responseParser = new CodexResponseParser(mapper);
     private final CodexAppServerClient client = new CodexAppServerClient(
         mapper,
+        properties,
+        runtimeSettings,
+        transport,
+        responseParser
+    );
+    private final CodexModelService models = new CodexModelService(
         properties,
         runtimeSettings,
         transport,
@@ -105,7 +112,7 @@ class CodexAppServerTransportTest {
 
     @Test
     void reportsSafeRuntimeStatusWithoutStartingAModelTurn() throws Exception {
-        var status = client.status();
+        var status = models.status();
 
         assertThat(status.enabled()).isTrue();
         assertThat(status.connected()).isTrue();
@@ -122,13 +129,13 @@ class CodexAppServerTransportTest {
 
     @Test
     void cachesTheModelCatalogInTheBackendForFiveHours() {
-        client.settings();
-        client.settings();
+        models.settings();
+        models.settings();
 
         assertThat(first.requests("model/list")).hasSize(1);
 
         when(clock.instant()).thenReturn(Instant.parse("2026-09-02T05:00:00Z"));
-        client.settings();
+        models.settings();
 
         assertThat(first.requests("model/list")).hasSize(2);
     }
@@ -152,7 +159,7 @@ class CodexAppServerTransportTest {
     void validatesAndAppliesSavedRuntimeSettingsToNewRequests() throws Exception {
         when(runtimeSettings.update("", "high")).thenReturn(new CodexRuntimeSettings.Selection("", "high"));
 
-        var updated = client.updateSettings(
+        var updated = models.updateSettings(
             new com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings("", "HIGH")
         );
 
@@ -171,7 +178,7 @@ class CodexAppServerTransportTest {
     @Test
     void rejectsAnUnsupportedReasoningEffortWithoutSavingIt() {
         assertThatThrownBy(() ->
-            client.updateSettings(
+            models.updateSettings(
                 new com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings("", "ultra")
             )
         )
@@ -380,7 +387,7 @@ class CodexAppServerTransportTest {
     void disabledIntegrationDoesNotStartAProcess() throws Exception {
         properties.getCodex().setEnabled(false);
         assertThatThrownBy(client::listThreads).isInstanceOf(KnowledgeException.class);
-        assertThat(client.status().enabled()).isFalse();
+        assertThat(models.status().enabled()).isFalse();
         verifyNoInteractions(processes);
     }
 

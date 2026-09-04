@@ -39,8 +39,7 @@ class CodexConnectionSmokeTest {
                 properties,
                 settings,
                 transport,
-                java.time.Clock.systemUTC(),
-                com.projectsknowledge.general.cache.PersistentKnowledgeCache.disabled()
+                new CodexResponseParser(mapper)
             );
             long started = System.nanoTime();
             client.listThreads();

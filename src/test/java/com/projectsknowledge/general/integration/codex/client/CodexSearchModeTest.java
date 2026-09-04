@@ -6,22 +6,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.business.knowledge.schema.request.ReqQuestion;
-import com.projectsknowledge.general.config.CodexRuntimeSettings;
-import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 
 class CodexSearchModeTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final CodexAppServerClient client = new CodexAppServerClient(
-        mapper,
-        new ProjectsKnowledgeProperties(),
-        org.mockito.Mockito.mock(CodexRuntimeSettings.class),
-        org.mockito.Mockito.mock(CodexAppServerTransport.class),
-        java.time.Clock.systemUTC(),
-        com.projectsknowledge.general.cache.PersistentKnowledgeCache.disabled()
-    );
+    private final CodexResponseParser parser = new CodexResponseParser(mapper);
 
     @Test
     void basicRequestsOnlySummaryConfidenceAndScope() {
@@ -61,7 +52,7 @@ class CodexSearchModeTest {
 
     @Test
     void basicIsAdaptedToExistingAnswerWithoutDetailedSections() throws Exception {
-        var result = client.parseAnswer(
+        var result = parser.parseAnswer(
             """
             {"inScope":true,"answer":"Uses Angular.","confidence":"high"}
             """,
@@ -118,7 +109,7 @@ class CodexSearchModeTest {
 
     @Test
     void workflowParsesRolesStepsAndExampleWithoutTechnicalSections() throws Exception {
-        var result = client.parseAnswer(
+        var result = parser.parseAnswer(
             """
             {"inScope":true,"answer":"Review process","confidence":"high",
              "roles":[{"role":"REVIEWER","capability":"Reviews a request","evidence":"Review guard"}],
@@ -141,7 +132,7 @@ class CodexSearchModeTest {
 
     @Test
     void unverifiedWorkflowDoesNotInventStepsOrExample() throws Exception {
-        var result = client.parseAnswer(
+        var result = parser.parseAnswer(
             """
             {"inScope":true,"answer":"Unable to verify the workflow.","confidence":"low","roles":[],
              "businessFlow":[],"workflowExample":"","risks":["Role mapping is missing."],"sources":[]}
@@ -156,7 +147,7 @@ class CodexSearchModeTest {
 
     @Test
     void workflowDiagramSurvivesParsingAndOtherModesNeedNoDiagram() throws Exception {
-        var result = client.parseAnswer(
+        var result = parser.parseAnswer(
             """
             {"inScope":true,"answer":"Review","confidence":"high","roles":[],"businessFlow":[],"workflowExample":"",
              "risks":[],"sources":[],"workflowDiagram":{
@@ -169,13 +160,13 @@ class CodexSearchModeTest {
         assertThat(result.workflowDiagram().nodes()).hasSize(2);
         assertThat(result.workflowDiagram().edges().getFirst().label()).isEqualTo("Approve");
         assertThat(
-            client
+            parser
                 .parseAnswer("{\"inScope\":true,\"answer\":\"Basic\",\"confidence\":\"high\"}", SearchMode.BASIC)
                 .workflowDiagram()
                 .nodes()
         ).isEmpty();
         assertThat(
-            client
+            parser
                 .parseAnswer("{\"inScope\":true,\"answer\":\"Advanced\",\"confidence\":\"high\"}", SearchMode.ADVANCED)
                 .workflowDiagram()
                 .nodes()
@@ -198,14 +189,14 @@ class CodexSearchModeTest {
                 );
             for (String flag : new String[] { "", "\"inScope\":null,", "\"inScope\":\"true\",", "\"inScope\":1," }) {
                 assertThatThrownBy(() ->
-                    client.parseAnswer("{" + flag + "\"answer\":\"Unrelated content\",\"confidence\":\"high\"}", mode)
+                    parser.parseAnswer("{" + flag + "\"answer\":\"Unrelated content\",\"confidence\":\"high\"}", mode)
                 ).isInstanceOf(java.io.IOException.class);
             }
             assertThat(
-                client.parseAnswer("{\"inScope\":false,\"answer\":\"\",\"confidence\":\"low\"}", mode).inScope()
+                parser.parseAnswer("{\"inScope\":false,\"answer\":\"\",\"confidence\":\"low\"}", mode).inScope()
             ).isFalse();
             assertThat(
-                client
+                parser
                     .parseAnswer("{\"inScope\":true,\"answer\":\"No evidence\",\"confidence\":\"low\"}", mode)
                     .inScope()
             ).isTrue();
@@ -247,7 +238,7 @@ class CodexSearchModeTest {
 
     @Test
     void databaseResultPreservesSchemaDetailsAndEmptiesUnrelatedSections() throws Exception {
-        var result = client.parseAnswer(
+        var result = parser.parseAnswer(
             """
             {"inScope":true,"answer":"Orders reference customers.","confidence":"high",
              "keyFindings":["OrderStore loads orders by customer_id."],
@@ -282,7 +273,7 @@ class CodexSearchModeTest {
 
     @Test
     void databaseMissingEvidenceAndOlderAdvancedTablesRemainCompatible() throws Exception {
-        var missing = client.parseAnswer(
+        var missing = parser.parseAnswer(
             """
             {"inScope":true,"answer":"No database schema found.","confidence":"low"}
             """,
@@ -293,7 +284,7 @@ class CodexSearchModeTest {
         assertThat(missing.sources()).isEmpty();
         assertThat(missing.keyFindings()).isEmpty();
         assertThat(missing.risks()).isEmpty();
-        var advanced = client.parseAnswer(
+        var advanced = parser.parseAnswer(
             """
             {"inScope":true,"answer":"Stores orders.","confidence":"high",
              "database":[{"table":"orders","entity":"Order","repository":"OrderStore","purpose":"Stores orders."}]}

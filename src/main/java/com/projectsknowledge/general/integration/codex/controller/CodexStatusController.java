@@ -1,6 +1,6 @@
 package com.projectsknowledge.general.integration.codex.controller;
 
-import com.projectsknowledge.general.integration.codex.client.CodexAppServerClient;
+import com.projectsknowledge.general.integration.codex.client.CodexModelService;
 import com.projectsknowledge.general.integration.codex.schema.request.ReqCodexSettings;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexSettings;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexStatus;
@@ -18,20 +18,20 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class CodexStatusController {
 
-    private final CodexAppServerClient client;
+    private final CodexModelService models;
 
     @GetMapping("/status")
     public ResponseEntity<DtoCodexStatus> status() {
-        return ResponseEntity.ok(client.status());
+        return ResponseEntity.ok(models.status());
     }
 
     @GetMapping("/settings")
     public ResponseEntity<DtoCodexSettings> settings() {
-        return ResponseEntity.ok(client.settings());
+        return ResponseEntity.ok(models.settings());
     }
 
     @PutMapping("/settings")
     public ResponseEntity<DtoCodexSettings> updateSettings(@Valid @RequestBody ReqCodexSettings request) {
-        return ResponseEntity.ok(client.updateSettings(request));
+        return ResponseEntity.ok(models.updateSettings(request));
     }
 }

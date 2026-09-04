@@ -3,8 +3,6 @@ package com.projectsknowledge.general.integration.codex.client;
 import static org.assertj.core.api.Assertions.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.projectsknowledge.general.config.CodexRuntimeSettings;
-import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import java.io.IOException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -12,14 +10,7 @@ import org.junit.jupiter.api.Test;
 class DtoCodexProjectOverviewTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final CodexAppServerClient client = new CodexAppServerClient(
-        mapper,
-        new ProjectsKnowledgeProperties(),
-        org.mockito.Mockito.mock(CodexRuntimeSettings.class),
-        org.mockito.Mockito.mock(CodexAppServerTransport.class),
-        java.time.Clock.systemUTC(),
-        com.projectsknowledge.general.cache.PersistentKnowledgeCache.disabled()
-    );
+    private final CodexResponseParser parser = new CodexResponseParser(mapper);
     private final String valid = """
         {"frontend":[],"backend":["Spring Boot"],"databases":[],"domains":["Shipping"],
          "integrations":[{"name":"Orbit","repositoryName":"arbitrary","filePath":"src/remote.java"}],
@@ -45,7 +36,7 @@ class DtoCodexProjectOverviewTest {
             "Never modify files or expose credentials",
             "relevant callers"
         );
-        assertThat(client.parseOverview(valid).integrations().getFirst().name()).isEqualTo("Orbit");
+        assertThat(parser.parseOverview(valid).integrations().getFirst().name()).isEqualTo("Orbit");
     }
 
     @Test
@@ -57,10 +48,10 @@ class DtoCodexProjectOverviewTest {
             valid.replace("\"filePath\":\"src/remote.java\"", "\"filePath\":\"\""),
             valid.replace("\"Spring Boot\"", "1")
         )) {
-            assertThatThrownBy(() -> client.parseOverview(invalid)).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> parser.parseOverview(invalid)).isInstanceOf(IOException.class);
         }
         var empty = mapper.readTree(valid);
         ((com.fasterxml.jackson.databind.node.ObjectNode) empty).putArray("integrations");
-        assertThat(client.parseOverview(empty.toString()).integrations()).isEmpty();
+        assertThat(parser.parseOverview(empty.toString()).integrations()).isEmpty();
     }
 }
