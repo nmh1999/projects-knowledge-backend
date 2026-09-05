@@ -43,19 +43,19 @@ class CodexAppServerTransportTest {
     private final CodexRuntimeSettings runtimeSettings = mock(CodexRuntimeSettings.class);
     private final Clock clock = mock(Clock.class);
     private final CodexResponseParser responseParser = new CodexResponseParser(mapper);
-    private final CodexAppServerClient client = new CodexAppServerClient(
-        mapper,
-        properties,
-        runtimeSettings,
-        transport,
-        responseParser
-    );
     private final CodexModelService models = new CodexModelService(
         properties,
         runtimeSettings,
         transport,
         clock,
         PersistentKnowledgeCache.disabled()
+    );
+    private final CodexAppServerClient client = new CodexAppServerClient(
+        mapper,
+        properties,
+        transport,
+        responseParser,
+        models
     );
 
     @BeforeEach
@@ -175,6 +175,32 @@ class CodexAppServerTransportTest {
         assertThat(ask("sample")).isEqualTo("done");
         assertThat(first.requests("thread/start").getFirst().at("/params/model").asText()).isEqualTo("custom-model");
         assertThat(first.requests("turn/start").getFirst().at("/params/effort").asText()).isEqualTo("high");
+    }
+
+    @Test
+    void automaticallySendsTheHighestAvailableModel() throws Exception {
+        first.handler = (peer, request) -> {
+            if ("model/list".equals(request.path("method").asText())) {
+                peer.reply(
+                    request,
+                    Map.of(
+                        "data",
+                        List.of(
+                            model("test-highest", "Test Highest", false),
+                            model("test-default", "Test Default", true)
+                        )
+                    )
+                );
+                return true;
+            }
+            if (!"turn/start".equals(request.path("method").asText())) return false;
+            peer.complete(request, "done", false);
+            return true;
+        };
+
+        assertThat(ask("sample")).isEqualTo("done");
+        assertThat(first.requests("thread/start").getFirst().at("/params/model").asText())
+            .isEqualTo("test-highest");
     }
 
     @Test
@@ -500,5 +526,24 @@ class CodexAppServerTransportTest {
 
     private static String prompt(JsonNode request) {
         return request.at("/params/input/0/text").asText();
+    }
+
+    private static Map<String, Object> model(String id, String displayName, boolean defaultModel) {
+        return Map.of(
+            "model",
+            id,
+            "displayName",
+            displayName,
+            "isDefault",
+            defaultModel,
+            "defaultReasoningEffort",
+            "medium",
+            "supportedReasoningEfforts",
+            List.of(
+                Map.of("reasoningEffort", "low", "description", "Faster"),
+                Map.of("reasoningEffort", "medium", "description", "Balanced"),
+                Map.of("reasoningEffort", "high", "description", "Deeper")
+            )
+        );
     }
 }

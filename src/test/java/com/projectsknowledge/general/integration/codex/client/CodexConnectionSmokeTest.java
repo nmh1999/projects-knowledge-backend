@@ -4,9 +4,12 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.projectsknowledge.general.cache.PersistentKnowledgeCache;
 import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
+import com.projectsknowledge.general.integration.codex.service.CodexModelService;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -34,12 +37,19 @@ class CodexConnectionSmokeTest {
                 properties.getCodex().getModel(),
                 properties.getCodex().getReasoningEffort()
             );
-            var client = new CodexAppServerClient(
-                mapper,
+            var models = new CodexModelService(
                 properties,
                 settings,
                 transport,
-                new CodexResponseParser(mapper)
+                Clock.systemUTC(),
+                PersistentKnowledgeCache.disabled()
+            );
+            var client = new CodexAppServerClient(
+                mapper,
+                properties,
+                transport,
+                new CodexResponseParser(mapper),
+                models
             );
             long started = System.nanoTime();
             client.listThreads();

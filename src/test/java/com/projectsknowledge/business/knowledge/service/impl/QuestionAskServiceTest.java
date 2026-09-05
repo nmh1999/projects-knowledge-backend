@@ -329,8 +329,8 @@ class QuestionAskServiceTest {
                 mapper,
                 properties,
                 null,
-                null,
-                new CodexResponseParser(mapper)
+                new CodexResponseParser(mapper),
+                null
             );
             this.result = result;
         }

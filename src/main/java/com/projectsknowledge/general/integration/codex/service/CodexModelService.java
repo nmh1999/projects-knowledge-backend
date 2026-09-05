@@ -99,6 +99,15 @@ public class CodexModelService implements CacheClearable {
         return buildSettings(account, models, saved);
     }
 
+    /** Resolves the automatic option to the highest model offered by the connected Codex runtime. */
+    public CodexRuntimeSettings.Selection selectionForRequest() {
+        var selected = runtimeSettings.current();
+        if (!selected.model().isBlank()) return selected;
+        DtoCodexModel model = findModel(models(), selected.model());
+        if (model == null) return selected;
+        return new CodexRuntimeSettings.Selection(model.id(), supportedEffort(model, selected.reasoningEffort()));
+    }
+
     private JsonNode readAccount() {
         return transport.request("account/read", Map.of("refreshToken", false), setupTimeout());
     }
@@ -178,7 +187,10 @@ public class CodexModelService implements CacheClearable {
     ) {
         DtoCodexModel effective = findModel(models, selected.model());
         String effectiveModel = effective == null ? selected.model() : effective.id();
-        DtoCodexStatus status = buildStatus(account, effectiveModel, selected.reasoningEffort());
+        String effectiveEffort = effective == null
+            ? selected.reasoningEffort()
+            : supportedEffort(effective, selected.reasoningEffort());
+        DtoCodexStatus status = buildStatus(account, effectiveModel, effectiveEffort);
         return new DtoCodexSettings(status, selected.model(), models);
     }
 
@@ -203,9 +215,16 @@ public class CodexModelService implements CacheClearable {
 
     private DtoCodexModel findModel(List<DtoCodexModel> models, String selectedModel) {
         if (selectedModel == null || selectedModel.isBlank()) {
-            return models.stream().filter(DtoCodexModel::defaultModel).findFirst().orElse(null);
+            return models.isEmpty() ? null : models.getFirst();
         }
         return models.stream().filter(model -> model.id().equals(selectedModel.strip())).findFirst().orElse(null);
+    }
+
+    private String supportedEffort(DtoCodexModel model, String selectedEffort) {
+        boolean supported = model.reasoningEfforts().stream().anyMatch(option -> option.value().equals(selectedEffort));
+        if (supported) return selectedEffort;
+        if (!model.defaultReasoningEffort().isBlank()) return model.defaultReasoningEffort();
+        return model.reasoningEfforts().isEmpty() ? selectedEffort : model.reasoningEfforts().getFirst().value();
     }
 
     private boolean isFresh(ModelCatalogSnapshot snapshot, Instant now, int ttlSeconds) {

@@ -5,12 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.projectsknowledge.business.knowledge.enums.SearchMode;
 import com.projectsknowledge.general.cancellation.RequestCancellation;
-import com.projectsknowledge.general.config.CodexRuntimeSettings;
 import com.projectsknowledge.general.config.ProjectsKnowledgeProperties;
 import com.projectsknowledge.general.exception.ApiErrorCode;
 import com.projectsknowledge.general.exception.KnowledgeException;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexKnowledgeResult;
 import com.projectsknowledge.general.integration.codex.schema.response.DtoCodexProjectOverview;
+import com.projectsknowledge.general.integration.codex.service.CodexModelService;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -34,9 +34,9 @@ public class CodexAppServerClient {
 
     private final ObjectMapper mapper;
     private final ProjectsKnowledgeProperties properties;
-    private final CodexRuntimeSettings runtimeSettings;
     private final CodexAppServerTransport transport;
     private final CodexResponseParser responseParser;
+    private final CodexModelService modelService;
 
     public List<CodexThread> listThreads() {
         RequestCancellation.check();
@@ -110,7 +110,7 @@ public class CodexAppServerClient {
         long turnStarted = 0;
         boolean completed = false;
         try {
-            var selectedRuntime = runtimeSettings.current();
+            var selectedRuntime = modelService.selectionForRequest();
             List<String> roots = workspaceRoots
                 .stream()
                 .map(path -> path.toAbsolutePath().normalize().toString())
